@@ -1738,6 +1738,7 @@ groq_api_key = st.sidebar.text_input(
     type="password",
     help="Groq 콘솔에서 발급받은 API 키를 입력하면 분석 결과를 AI가 자연어로 해석해 줍니다. 없어도 앱의 모든 기능을 사용할 수 있습니다.",
 )
+groq_api_key = groq_api_key.strip() if groq_api_key else ""
 ai_enabled = bool(groq_api_key)
 
 csv_bytes = uploaded_bytes if uploaded_bytes is not None else raw_df.to_csv(index=False).encode("utf-8")
@@ -2274,7 +2275,7 @@ with tabs[3]:
                 f"1. Qiskit Aer 시뮬레이터에서 Grover 회로가 의도대로 진폭 증폭(Amplitude Amplification)을 수행했는지 평가하세요.\n"
                 f"2. 전수조사 대비 Grover 알고리즘의 복잡도 이점($O(\\sqrt{{N}})$)이 이 문제에서 어떻게 나타나는지 설명하세요.\n"
                 f"3. 측정 분포 차트에서 나타나는 'Good' 상태와 'Valid' 상태의 차이가 무엇을 의미하는지 비전문가에게 설명하세요.\n"
-                f"4. 이 양자적 시도가 인과 추론 분야에서 어떤 가능성을 보여주는지 Qiskit 수업의 맥락에서 정리하세요.\n\n"
+                f"4. 이 양자적 시도가 인과 추론 분야에서 어떤 방법론적 혁신을 보여주는지 데이터 과학적 관점에서 정리하세요.\n\n"
                 f"격식 있고 전문적인 톤으로 작성하세요."
             )
             _cache_key_q = prompt_cache_key("quantum", _ai_prompt_quantum)
