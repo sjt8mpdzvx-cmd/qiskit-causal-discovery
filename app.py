@@ -1755,7 +1755,7 @@ with tabs[0]:
     with data_cols[1]:
         if has_ground_truth:
             st.pyplot(
-                draw_dag(ground_truth, variables, "알려진 정답 구조", subtitle=format_edges(ground_truth.edges())),
+                draw_dag(ground_truth, variables, "Ground Truth DAG", subtitle=format_edges(ground_truth.edges())),
                 use_container_width=True,
             )
             st.markdown(
@@ -1785,7 +1785,7 @@ with tabs[1]:
     if has_ground_truth:
         with graph_cols[0]:
             st.pyplot(
-                draw_dag(ground_truth, variables, "정답 구조", subtitle=format_edges(ground_truth.edges())),
+                draw_dag(ground_truth, variables, "Ground Truth DAG", subtitle=format_edges(ground_truth.edges())),
                 use_container_width=True,
             )
     with graph_cols[-2]:
@@ -1793,7 +1793,7 @@ with tabs[1]:
         if best_metrics:
             subtitle = f"SHD={best_metrics['shd']}, F1={best_metrics['f1']:.2f}"
         st.pyplot(
-            draw_dag(best_graph, variables, "발견된 최적 구조 (BDeu 1위)", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
+            draw_dag(best_graph, variables, "Best DAG by BDeu", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
             use_container_width=True,
         )
     with graph_cols[-1]:
@@ -1877,12 +1877,17 @@ with tabs[2]:
 
     choice = st.radio("개입 분석에 사용할 구조", list(dag_options.keys()), horizontal=True)
     chosen_dag = dag_options[choice]
+    chosen_dag_title = {
+        "발견된 최적 구조 (고전)": "Classical Best DAG",
+        "Grover 탐색 결과": "Grover Selected DAG",
+        "정답 구조 (기준)": "Ground Truth DAG",
+    }.get(choice, "Selected DAG")
     intervention = intervention_table(data, chosen_dag, variables, outcome, outcome_higher_is_better)
 
     # Main visualization
     int_cols = st.columns([0.85, 1.15])
     with int_cols[0]:
-        st.pyplot(draw_dag(chosen_dag, variables, choice, reference=ground_truth if has_ground_truth else None), use_container_width=True)
+        st.pyplot(draw_dag(chosen_dag, variables, chosen_dag_title, reference=ground_truth if has_ground_truth else None), use_container_width=True)
     with int_cols[1]:
         if intervention.empty:
             st.warning("개입 효과를 계산할 후보 변수가 없습니다.")
@@ -2032,13 +2037,13 @@ with tabs[3]:
         compare_cols = st.columns(3 if has_ground_truth else 2)
         if has_ground_truth:
             with compare_cols[0]:
-                st.pyplot(draw_dag(ground_truth, variables, "정답 구조"), use_container_width=True)
+                st.pyplot(draw_dag(ground_truth, variables, "Ground Truth DAG"), use_container_width=True)
         with compare_cols[-2]:
             subtitle = f"rank 1, {format_edges(best_graph.edges())}"
             if best_metrics:
                 subtitle = f"SHD={best_metrics['shd']}, F1={best_metrics['f1']:.2f}"
             st.pyplot(
-                draw_dag(best_graph, variables, "고전 결과", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
+                draw_dag(best_graph, variables, "Classical Result", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
                 use_container_width=True,
             )
         with compare_cols[-1]:
@@ -2046,7 +2051,7 @@ with tabs[3]:
             if grover_metrics:
                 subtitle = f"SHD={grover_metrics['shd']}, F1={grover_metrics['f1']:.2f}"
             st.pyplot(
-                draw_dag(grover_graph, variables, "Grover 결과", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
+                draw_dag(grover_graph, variables, "Grover Result", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
                 use_container_width=True,
             )
 
