@@ -2106,12 +2106,17 @@ with tabs[2]:
             "3) 정답 구조나 결과 변수 변경으로 다시 확인해야 한다는 점"
         )
         _ai_prompt_intv = (
-            f"당신은 인과 추론 전문가입니다. 아래 개입(intervention) 분석 결과를 비전문가가 바로 의사결정에 참고할 수 있게 한국어로 해석해주세요. "
-            f"마크다운 문법 없이 일반 텍스트로 5~6문장 이내로 작성하세요.\n\n"
-            f"데이터셋: {dataset_name}\n결과 변수({'높이고 싶은 것' if outcome_higher_is_better else '줄이고 싶은 것'}): {outcome}\n"
-            f"사용한 DAG 구조: {_ai_edges_intv}\n\n"
-            f"개입 효과 분석 결과:\n{_intv_summary}\n\n"
-            f"설명할 것:\n{_intv_instructions}"
+            f"당신은 인과 추론 전문가입니다. 아래의 '개입 효과 분석(do-calculus)' 결과를 바탕으로, 실제 현장에서 어떤 조치를 취해야 {outcome}을 {'증가' if outcome_higher_is_better else '감소'}시킬 수 있는지에 대한 전략 보고서를 작성하세요.\n\n"
+            f"### 포함될 내용:\n"
+            f"1. **최적의 개입 타겟**: 효과가 가장 강력한 변수와 구체적인 조치 방향(예: X를 높여야 함)\n"
+            f"2. **기대 효과**: 해당 조치를 취했을 때 {outcome}이 통계적으로 어느 정도 변화할 것으로 예상되는지 설명\n"
+            f"3. **데이터 기반 신뢰도**: Coverage 지표를 바탕으로 이 추천이 얼마나 많은 데이터 근거를 가졌는지 설명\n"
+            f"4. **우선순위 제언**: 여러 변수 중 무엇부터 건드려야 비용 대비 효율적인지 제안\n\n"
+            f"### 분석 데이터:\n"
+            f"- 결과 변수({'높이고 싶은 것' if outcome_higher_is_better else '줄이고 싶은 것'}): {outcome}\n"
+            f"- 사용한 인과 구조: {_ai_edges_intv}\n"
+            f"- 개입 효과 요약:\n{_intv_summary}\n\n"
+            f"전문적인 컨설팅 보고서 스타일로 작성하되, 'do-calculus', 'backdoor' 같은 용어는 '인과 관계 보정법' 등으로 쉽게 풀어서 설명하세요."
         )
         _cache_key_i = prompt_cache_key("intervention", _ai_prompt_intv)
         if _has_actionable_intv:
@@ -2469,6 +2474,10 @@ with tabs[4]:
         if st.button("AI 종합 해석 생성", key="ai_btn_synthesis"):
             with st.spinner("Groq가 종합 분석을 생성하는 중..."):
                 call_groq(groq_api_key, _ai_prompt_syn, _cache_key_syn, _local_syn_summary)
+        _cached_syn = st.session_state.get(f"groq_{_cache_key_syn}")
+        if _cached_syn:
+            render_ai_box(_cached_syn)
+)
         _cached_syn = st.session_state.get(f"groq_{_cache_key_syn}")
         if _cached_syn:
             render_ai_box(_cached_syn)
