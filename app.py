@@ -393,90 +393,92 @@ def draw_dag(
     reference: nx.DiGraph | None = None,
     subtitle: str | None = None,
 ) -> plt.Figure:
-    fig, ax = plt.subplots(figsize=(4.8, 3.8))
+    fig, ax = plt.subplots(figsize=(8, 4.5))
     fig.patch.set_facecolor("#ffffff")
-    ax.set_facecolor("#ffffff")
-    graph = graph.copy()
-    graph.add_nodes_from(variables)
+    
+    G = graph.copy()
+    G.add_nodes_from(variables)
+    
+    # 1. 지그재그 계층 레이아웃 (엣지 겹침 방지)
+    try:
+        layers = list(nx.topological_generations(G))
+        pos = {}
+        for x, nodes in enumerate(layers):
+            nodes = sorted(nodes)
+            for y, node in enumerate(nodes):
+                # x축 간격은 넓게, y축은 중앙 정렬 + 미세한 지그재그(x%2 * 0.2)
+                y_coord = -(y - (len(nodes)-1)/2.0) * 1.5
+                y_jitter = 0.2 if x % 2 == 0 else -0.2
+                pos[node] = (x * 2.5, y_coord + y_jitter)
+    except:
+        pos = nx.spring_layout(G, k=1.5, seed=42)
 
-    pos = known_layout(variables)
-    if pos is None:
-        if nx.is_directed_acyclic_graph(graph) and len(graph.edges()) > 0:
-            generations = list(nx.topological_generations(graph))
-            pos = {}
-            for layer_idx, layer in enumerate(generations):
-                layer = sorted(layer)
-                for item_idx, node in enumerate(layer):
-                    pos[node] = (layer_idx, -item_idx)
-            missing = [node for node in variables if node not in pos]
-            for idx, node in enumerate(missing):
-                pos[node] = (0, -idx)
-        else:
-            pos = nx.spring_layout(graph, seed=7)
+    missing = [n for n in variables if n not in pos]
+    for i, n in enumerate(missing):
+        pos[n] = (-1.5, -(i - (len(missing)-1)/2.0) * 1.5)
 
-    # Shadow nodes for depth effect
-    shadow_pos = {k: (v[0] + 0.015, v[1] - 0.015) for k, v in pos.items()}
-    nx.draw_networkx_nodes(
-        graph, shadow_pos, ax=ax,
-        node_color="#e2e8f0", node_size=1600, edgecolors="none", linewidths=0, alpha=0.5,
-    )
-
+    # 2. 노드 그리기
     node_colors = []
-    for node in graph.nodes():
-        if graph.out_degree(node) > 0 and graph.in_degree(node) == 0:
-            node_colors.append("#eef2ff")  # source: indigo tint
-        elif graph.out_degree(node) == 0:
-            node_colors.append("#fef3c7")  # sink: amber tint
+    for node in G.nodes():
+        if G.out_degree(node) > 0 and G.in_degree(node) == 0:
+            node_colors.append("#eef2ff") # Source
+        elif G.out_degree(node) == 0:
+            node_colors.append("#fef3c7") # Sink
         else:
-            node_colors.append("#f0fdf4")  # intermediate: green tint
+            node_colors.append("#f0fdf4") # Mid
 
     nx.draw_networkx_nodes(
-        graph, pos, ax=ax,
-        node_color=node_colors, node_size=1600,
-        edgecolors="#334155", linewidths=2.0,
+        G, pos, ax=ax,
+        node_color=node_colors, node_size=2200,
+        edgecolors="#334155", linewidths=1.2, alpha=1.0
     )
+    
     nx.draw_networkx_labels(
-        graph, pos, ax=ax,
-        font_size=10.5, font_weight="bold", font_color="#1e293b",
+        G, pos, ax=ax, font_size=10, font_weight="bold", font_color="#1e293b"
     )
 
-    edge_colors = []
-    widths = []
-    styles = []
-    reference_edges = set(reference.edges()) if reference is not None else set()
-    for edge in graph.edges():
-        if reference is None:
-            edge_colors.append("#6366f1")
-            widths.append(2.5)
-            styles.append("solid")
-        elif edge in reference_edges:
-            edge_colors.append("#059669")
-            widths.append(3.0)
-            styles.append("solid")
-        else:
-            edge_colors.append("#ef4444")
-            widths.append(2.5)
-            styles.append("solid")
+    # 3. 곡선 화살표 그리기 (FancyArrowPatch)
+    import matplotlib.patches as patches
+    ref_edges = set(reference.edges()) if reference is not None else set()
+    
+    for u, v in G.edges():
+        # 기본/정답/오답 색상 및 굵기
+        color = "#6366f1"
+        width = 1.6
+        if reference is not None:
+            if (u, v) in ref_edges:
+                color = "#059669"
+                width = 2.0
+            else:
+                color = "#ef4444"
+                width = 1.5
 
-    if graph.edges():
-        nx.draw_networkx_edges(
-            graph, pos, ax=ax,
-            edge_color=edge_colors, width=widths,
-            arrows=True, arrowsize=24,
-            connectionstyle="arc3,rad=0.1",
-            min_source_margin=20, min_target_margin=20,
-            arrowstyle="-|>", node_size=1600,
+        # 화살표 크기를 대폭 줄임 (mutation_scale=10, head_length=1.2)
+        arrow = patches.FancyArrowPatch(
+            pos[u], pos[v],
+            arrowstyle='-|>,head_length=1.5,head_width=0.8',
+            connectionstyle="arc3,rad=0.12", # 자연스러운 곡선
+            color=color,
+            linewidth=width,
+            mutation_scale=10, # 화살표 헤드 크기 결정
+            shrinkA=15, # 시작 지점 여백
+            shrinkB=15, # 끝 지점 여백
+            zorder=1,
+            alpha=0.8
         )
+        ax.add_patch(arrow)
 
-    ax.set_title(title, fontsize=12.5, fontweight="bold", pad=16, color="#0f172a")
+    # 4. 축 범위 및 제목
+    ax.set_title(title, fontsize=13, fontweight="bold", pad=15)
     if subtitle:
         ax.text(
-            0.5, -0.06, subtitle, transform=ax.transAxes,
-            ha="center", va="top", fontsize=9,
-            color="#6366f1", fontweight="medium",
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="#eef2ff", edgecolor="#c7d2fe", alpha=0.8),
+            0.5, -0.02, subtitle, transform=ax.transAxes,
+            ha="center", va="top", fontsize=9, color="#475569",
+            bbox=dict(boxstyle="round,pad=0.3", fc="#f8fafc", ec="#e2e8f0", alpha=0.8)
         )
+    
     ax.axis("off")
+    ax.margins(0.15)
     fig.tight_layout()
     return fig
 
