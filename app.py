@@ -393,112 +393,87 @@ def draw_dag(
     reference: nx.DiGraph | None = None,
     subtitle: str | None = None,
 ) -> plt.Figure:
-    fig, ax = plt.subplots(figsize=(6, 4.5))
+    fig, ax = plt.subplots(figsize=(6, 4))
     fig.patch.set_facecolor("#ffffff")
-    ax.set_facecolor("#ffffff")
     
-    # 노드 추가 (엣지 없는 노드 포함)
+    # 노드 및 엣지 준비
     G = graph.copy()
     G.add_nodes_from(variables)
-
-    # 1. 레이아웃 결정
+    
+    # 1. 레이아웃: 좌->우 흐름을 보장하는 수동 계층 배치
     pos = known_layout(variables)
     if pos is None:
-        if nx.is_directed_acyclic_graph(G) and len(G.edges()) > 0:
-            generations = list(nx.topological_generations(G))
+        try:
+            # 인과 방향에 따른 계층 정렬
+            layers = list(nx.topological_generations(G))
             pos = {}
-            for layer_idx, layer in enumerate(generations):
-                layer = sorted(layer)
-                n_in_layer = len(layer)
-                for item_idx, node in enumerate(layer):
-                    x = layer_idx * 2.0  # 가로 간격 대폭 확대
-                    y = -(item_idx - (n_in_layer - 1) / 2.0) * 1.5 # 세로 중앙 정렬
-                    pos[node] = (x, y)
-            
-            # 레이아웃에 포함되지 않은 노드 처리
-            missing = [node for node in variables if node not in pos]
-            for idx, node in enumerate(missing):
-                pos[node] = (-1.5, -(idx - (len(missing) - 1) / 2.0) * 1.5)
-        else:
+            for x, nodes in enumerate(layers):
+                nodes = sorted(nodes)
+                for y, node in enumerate(nodes):
+                    # x축은 넓게, y축은 중앙 정렬
+                    pos[node] = (x * 2.0, -(y - (len(nodes)-1)/2.0))
+        except:
+            # 순환이 있을 경우 원형 배치
             pos = nx.circular_layout(G)
 
-    # 2. 노드 그리기
+    # 2. 노드 그리기 (색상: 인디고/앰버/그린)
     node_colors = []
     for node in G.nodes():
         if G.out_degree(node) > 0 and G.in_degree(node) == 0:
-            node_colors.append("#eef2ff") # Source
+            node_colors.append("#eef2ff") # 원인
         elif G.out_degree(node) == 0:
-            node_colors.append("#fef3c7") # Sink
+            node_colors.append("#fef3c7") # 결과
         else:
-            node_colors.append("#f0fdf4") # Mid
+            node_colors.append("#f0fdf4") # 중간
 
     nx.draw_networkx_nodes(
         G, pos, ax=ax,
-        node_color=node_colors, node_size=1500,
-        edgecolors="#334155", linewidths=1.5, alpha=0.95
+        node_color=node_colors, node_size=1600,
+        edgecolors="#334155", linewidths=1.2
     )
     
     nx.draw_networkx_labels(
-        G, pos, ax=ax,
-        font_size=9, font_weight="bold", font_color="#1e293b"
+        G, pos, ax=ax, font_size=9, font_weight="bold", font_color="#1e293b"
     )
 
-    # 3. 정밀한 화살표 그리기 (FancyArrowPatch)
-    import matplotlib.patches as patches
+    # 3. 직선 화살표 그리기
     ref_edges = set(reference.edges()) if reference is not None else set()
-    
     for u, v in G.edges():
-        color = "#6366f1" # Default Indigo
-        width = 1.5
-        
+        # 기본: 인디고, 정답: 그린, 오답: 레드
+        edge_color = "#6366f1"
         if reference is not None:
-            if (u, v) in ref_edges:
-                color = "#059669" # Correct (Green)
-                width = 2.0
-            else:
-                color = "#ef4444" # Incorrect (Red)
-                width = 1.5
-
-        # 노드 중심이 아닌 테두리에서 시작하고 끝나도록 좌표 보정
-        start_pos = np.array(pos[u])
-        end_pos = np.array(pos[v])
-        vec = end_pos - start_pos
-        dist = np.linalg.norm(vec)
-        if dist == 0: continue
-        
-        # 노드 반지름(약 0.25)만큼 안쪽으로 줄임
-        start_adj = start_pos + (vec / dist) * 0.3
-        end_adj = end_pos - (vec / dist) * 0.3
-        
-        arrow = patches.FancyArrowPatch(
-            start_adj, end_adj,
-            arrowstyle='-|>,head_length=5,head_width=3',
-            connectionstyle="arc3,rad=0.05", # 겹침 방지용 미세한 곡선
-            color=color,
-            linewidth=width,
-            mutation_scale=15,
-            zorder=1,
-            alpha=0.8
+            edge_color = "#059669" if (u, v) in ref_edges else "#ef4444"
+            
+        ax.annotate(
+            "",
+            xy=pos[v], xytext=pos[u],
+            arrowprops=dict(
+                arrowstyle="-|>,head_length=0.6,head_width=0.3",
+                color=edge_color,
+                lw=1.8,
+                shrinkA=20, # 노드에서 시작 지점 띄움
+                shrinkB=20, # 노드에서 끝 지점 띄움
+                connectionstyle="arc3,rad=0", # 무조건 직선
+                alpha=0.8
+            )
         )
-        ax.add_patch(arrow)
 
-    # 4. 축 범위 및 제목 설정
-    all_pos = np.array(list(pos.values()))
-    x_min, y_min = np.min(all_pos, axis=0) - 1.0
-    x_max, y_max = np.max(all_pos, axis=0) + 1.0
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
-    
-    ax.set_title(title, fontsize=12, fontweight="bold", pad=15, color="#0f172a")
+    # 4. 여백 및 제목
+    ax.set_title(title, fontsize=12, fontweight="bold", pad=10, color="#0f172a")
     if subtitle:
         ax.text(
-            0.5, -0.02, subtitle, transform=ax.transAxes,
-            ha="center", va="top", fontsize=8.5,
-            color="#64748b", fontweight="medium",
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="#f8fafc", edgecolor="#e2e8f0", alpha=0.8),
+            0.5, -0.05, subtitle, transform=ax.transAxes,
+            ha="center", va="top", fontsize=8.5, color="#64748b",
+            bbox=dict(boxstyle="round,pad=0.3", fc="#f8fafc", ec="#e2e8f0", alpha=0.8)
         )
     
     ax.axis("off")
+    # 여백을 넉넉히 주어 노드가 잘리는 것 방지
+    x_coords = [p[0] for p in pos.values()]
+    y_coords = [p[1] for p in pos.values()]
+    ax.set_xlim(min(x_coords) - 0.8, max(x_coords) + 0.8)
+    ax.set_ylim(min(y_coords) - 0.8, max(y_coords) + 0.8)
+    
     fig.tight_layout()
     return fig
 
