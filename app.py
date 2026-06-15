@@ -393,7 +393,7 @@ def draw_dag(
     reference: nx.DiGraph | None = None,
     subtitle: str | None = None,
 ) -> plt.Figure:
-    fig, ax = plt.subplots(figsize=(4.8, 3.8))
+    fig, ax = plt.subplots(figsize=(5.5, 4.5))
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
     graph = graph.copy()
@@ -406,67 +406,84 @@ def draw_dag(
             pos = {}
             for layer_idx, layer in enumerate(generations):
                 layer = sorted(layer)
+                n_in_layer = len(layer)
                 for item_idx, node in enumerate(layer):
-                    pos[node] = (layer_idx, -item_idx)
+                    # 중앙 정렬을 위한 좌표 계산
+                    x_coord = layer_idx
+                    y_coord = -(item_idx - (n_in_layer - 1) / 2.0)
+                    pos[node] = (x_coord, y_coord)
+            
             missing = [node for node in variables if node not in pos]
             for idx, node in enumerate(missing):
-                pos[node] = (0, -idx)
+                pos[node] = (-1, -(idx - (len(missing) - 1) / 2.0))
         else:
-            pos = nx.spring_layout(graph, seed=7)
+            pos = nx.shell_layout(graph)
 
-    # Shadow nodes for depth effect
-    shadow_pos = {k: (v[0] + 0.015, v[1] - 0.015) for k, v in pos.items()}
-    nx.draw_networkx_nodes(
-        graph, shadow_pos, ax=ax,
-        node_color="#e2e8f0", node_size=1600, edgecolors="none", linewidths=0, alpha=0.5,
-    )
-
+    # 노드 스타일 설정
     node_colors = []
     for node in graph.nodes():
         if graph.out_degree(node) > 0 and graph.in_degree(node) == 0:
-            node_colors.append("#eef2ff")  # source: indigo tint
+            node_colors.append("#eef2ff")  # 원인 노드: 연한 인디고
         elif graph.out_degree(node) == 0:
-            node_colors.append("#fef3c7")  # sink: amber tint
+            node_colors.append("#fef3c7")  # 결과 노드: 연한 앰버
         else:
-            node_colors.append("#f0fdf4")  # intermediate: green tint
+            node_colors.append("#f0fdf4")  # 중간 노드: 연한 그린
 
     nx.draw_networkx_nodes(
         graph, pos, ax=ax,
-        node_color=node_colors, node_size=1600,
-        edgecolors="#334155", linewidths=2.0,
+        node_color=node_colors, node_size=2000,
+        edgecolors="#334155", linewidths=1.5,
     )
+    
     nx.draw_networkx_labels(
         graph, pos, ax=ax,
-        font_size=10.5, font_weight="bold", font_color="#1e293b",
+        font_size=10, font_weight="bold", font_color="#1e293b",
     )
 
-    edge_colors = []
-    widths = []
-    styles = []
+    # 엣지 스타일 설정
     reference_edges = set(reference.edges()) if reference is not None else set()
     for edge in graph.edges():
-        if reference is None:
-            edge_colors.append("#6366f1")
-            widths.append(2.5)
-            styles.append("solid")
-        elif edge in reference_edges:
-            edge_colors.append("#059669")
-            widths.append(3.0)
-            styles.append("solid")
-        else:
-            edge_colors.append("#ef4444")
-            widths.append(2.5)
-            styles.append("solid")
+        src, dst = edge
+        color = "#6366f1"  # 기본 색상
+        width = 2.0
+        alpha = 0.8
+        
+        if reference is not None:
+            if edge in reference_edges:
+                color = "#059669"  # 정답 일치: 그린
+                width = 2.5
+            else:
+                color = "#ef4444"  # 정답 불일치: 레드
+                width = 2.0
 
-    if graph.edges():
-        nx.draw_networkx_edges(
-            graph, pos, ax=ax,
-            edge_color=edge_colors, width=widths,
-            arrows=True, arrowsize=24,
-            connectionstyle="arc3,rad=0.1",
-            min_source_margin=20, min_target_margin=20,
-            arrowstyle="-|>", node_size=1600,
+        ax.annotate(
+            "",
+            xy=pos[dst], xycoords='data',
+            xytext=pos[src], textcoords='data',
+            arrowprops=dict(
+                arrowstyle="-|>",
+                color=color,
+                linewidth=width,
+                shrinkA=22, shrinkB=22,
+                patchA=None, patchB=None,
+                connectionstyle="arc3,rad=0", # 직선으로 변경
+                mutation_scale=20,
+                alpha=alpha
+            ),
         )
+
+    ax.set_title(title, fontsize=13, fontweight="bold", pad=20, color="#0f172a")
+    if subtitle:
+        ax.text(
+            0.5, -0.05, subtitle, transform=ax.transAxes,
+            ha="center", va="top", fontsize=9.5,
+            color="#475569", fontweight="medium",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor="#f8fafc", edgecolor="#e2e8f0", alpha=0.9),
+        )
+    
+    ax.axis("off")
+    fig.tight_layout()
+    return fig
 
     ax.set_title(title, fontsize=12.5, fontweight="bold", pad=16, color="#0f172a")
     if subtitle:
