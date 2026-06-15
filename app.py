@@ -1286,6 +1286,31 @@ st.markdown(
     section[data-testid="stSidebar"] .stSlider [data-testid="stTickBarMax"] {
         color: #64748b !important;
     }
+    section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+    section[data-testid="stSidebar"] [data-baseweb="input"] > div,
+    section[data-testid="stSidebar"] textarea {
+        background: #ffffff !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 10px !important;
+        color: #0f172a !important;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+    section[data-testid="stSidebar"] [data-baseweb="select"] span,
+    section[data-testid="stSidebar"] [data-baseweb="select"] div,
+    section[data-testid="stSidebar"] [data-baseweb="input"] input,
+    section[data-testid="stSidebar"] textarea {
+        color: #0f172a !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] [data-baseweb="select"] svg {
+        color: #334155 !important;
+        fill: #334155 !important;
+    }
+    section[data-testid="stSidebar"] .stSelectbox,
+    section[data-testid="stSidebar"] .stMultiSelect,
+    section[data-testid="stSidebar"] .stTextInput {
+        margin-bottom: 0.75rem;
+    }
     section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
         background: #ffffff;
         border: 1px solid #cbd5e1;
@@ -1323,16 +1348,19 @@ st.markdown(
         background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%);
         pointer-events: none;
     }
+    .hero-container h1.hero-title,
     .hero-title {
         font-size: 1.85rem;
         font-weight: 700;
-        color: #f8fafc;
+        color: #f8fafc !important;
         margin: 0 0 0.3rem 0;
         letter-spacing: -0.02em;
+        text-shadow: 0 2px 18px rgba(0,0,0,0.35);
     }
+    .hero-container p.hero-subtitle,
     .hero-subtitle {
         font-size: 0.95rem;
-        color: #94a3b8;
+        color: #dbeafe !important;
         margin: 0;
         line-height: 1.5;
     }
@@ -2145,7 +2173,7 @@ with tabs[4]:
                 ), use_container_width=True)
         else:
             with gauge_cols[2]:
-                st.pyplot(plot_gauge(0, "Grover F1\n(실행 필요)",
+                st.pyplot(plot_gauge(0, "Grover F1\nRun first",
                     color_thresholds=[(1.01, "#e2e8f0")],
                 ), use_container_width=True)
     else:
