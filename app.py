@@ -8,6 +8,7 @@ Quantum Causal Discovery Lab
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import math
 import os
@@ -651,32 +652,50 @@ def call_gemini(api_key: str, prompt: str, cache_key: str) -> str:
     state_key = f"gemini_{cache_key}"
     if state_key in st.session_state:
         return st.session_state[state_key]
+    model_candidates = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(prompt)
-        result = response.text
-        st.session_state[state_key] = result
-        return result
+        errors = []
+        for model_name in model_candidates:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt)
+                result = getattr(response, "text", "")
+                if result and result.strip():
+                    result = result.strip()
+                    st.session_state[state_key] = result
+                    return result
+                errors.append(f"{model_name}: empty response")
+            except Exception as model_exc:
+                errors.append(f"{model_name}: {model_exc}")
+        result = "AI 해석 생성 실패: " + " | ".join(errors)
     except Exception as exc:
-        return f"AI 해석 생성 실패: {exc}"
+        result = f"AI 해석 생성 실패: {exc}"
+    st.session_state[state_key] = result
+    return result
 
 
 def render_ai_box(content: str):
     """AI 해석 결과를 스타일링된 박스로 렌더링한다."""
+    is_error = content.startswith("AI 해석 생성 실패")
+    box_bg = "#fef2f2" if is_error else "linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%)"
+    box_border = "#fecaca" if is_error else "#c7d2fe"
+    title_color = "#b91c1c" if is_error else "#6366f1"
+    title = "AI Interpretation Error" if is_error else "AI Interpretation (Gemini)"
+    safe_content = html.escape(content).replace("\n", "<br>")
     st.markdown(
         f"""
         <div style="
-            background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%);
-            border: 1px solid #c7d2fe;
+            background: {box_bg};
+            border: 1px solid {box_border};
             border-radius: 12px;
             padding: 1.2rem 1.4rem;
             margin: 1rem 0;
         ">
-            <div style="font-size: 0.78rem; font-weight: 700; color: #6366f1; text-transform: uppercase;
-                        letter-spacing: 0.05em; margin-bottom: 0.5rem;">AI Interpretation (Gemini)</div>
-            <div style="color: #1e293b; font-size: 0.92rem; line-height: 1.7;">{content}</div>
+            <div style="font-size: 0.78rem; font-weight: 700; color: {title_color}; text-transform: uppercase;
+                        letter-spacing: 0.05em; margin-bottom: 0.5rem;">{title}</div>
+            <div style="color: #1e293b; font-size: 0.92rem; line-height: 1.7;">{safe_content}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1210,7 +1229,7 @@ st.markdown(
 
     /* ── Global ── */
     .block-container {
-        padding-top: 1rem;
+        padding-top: 2.75rem;
         padding-bottom: 3rem;
         max-width: 1280px;
     }
@@ -1241,6 +1260,23 @@ st.markdown(
     section[data-testid="stSidebar"] .stSlider [data-testid="stTickBarMin"],
     section[data-testid="stSidebar"] .stSlider [data-testid="stTickBarMax"] {
         color: #64748b !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 12px;
+    }
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] *,
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] small,
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] span,
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] p {
+        color: #334155 !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] button {
+        background: #f8fafc !important;
+        border: 1px solid #cbd5e1 !important;
+        color: #334155 !important;
     }
 
     /* ── Hero header ── */
@@ -1376,6 +1412,22 @@ st.markdown(
         color: #334155;
         line-height: 1.55;
     }
+    .upload-empty-state {
+        margin-top: 1.2rem;
+        border-left: 4px solid #2563eb;
+        background: linear-gradient(90deg, #eff6ff 0%, #ffffff 100%);
+        color: #1e3a8a;
+        border-radius: 0 12px 12px 0;
+        padding: 1.2rem 1.4rem;
+        line-height: 1.6;
+        font-size: 0.95rem;
+        max-width: 920px;
+        overflow-wrap: break-word;
+        word-break: keep-all;
+    }
+    .upload-empty-state b {
+        color: #1d4ed8;
+    }
 
     /* ── Info / Warning / Success boxes ── */
     .stAlert > div {
@@ -1451,7 +1503,17 @@ else:
     spec = None
     uploaded = st.sidebar.file_uploader("CSV 파일", type=["csv"])
     if uploaded is None:
-        st.info("왼쪽 사이드바에서 CSV를 업로드하거나 내장 데이터셋을 선택하세요.")
+        st.markdown(
+            """
+            <div class="upload-empty-state">
+            <b>CSV 파일을 기다리는 중입니다.</b><br>
+            왼쪽 사이드바의 업로드 영역에서 CSV 파일을 선택하세요.
+            파일을 업로드하면 분석 변수, 결과 변수, BDeu 점수 계산, 개입 추천, Gemini 해석 기능이 표시됩니다.<br>
+            바로 시연하려면 데이터 소스를 <b>내장 데이터셋</b>으로 바꾸고 <b>Sprinkler weather</b>를 선택하세요.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.stop()
     uploaded_bytes = uploaded.getvalue()
     raw_df = pd.read_csv(io.BytesIO(uploaded_bytes))
