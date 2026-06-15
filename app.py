@@ -2476,8 +2476,9 @@ with tabs[4]:
                 call_groq(groq_api_key, _ai_prompt_syn, _cache_key_syn, _local_syn_summary)
         _cached_syn = st.session_state.get(f"groq_{_cache_key_syn}")
         if _cached_syn:
-            render_ai_box(_cached_syn)
-)
+        if st.button("AI 종합 해석 생성", key="ai_btn_synthesis"):
+            with st.spinner("Groq가 종합 분석을 생성하는 중..."):
+                call_groq(groq_api_key, _ai_prompt_syn, _cache_key_syn, _local_syn_summary)
         _cached_syn = st.session_state.get(f"groq_{_cache_key_syn}")
         if _cached_syn:
             render_ai_box(_cached_syn)
