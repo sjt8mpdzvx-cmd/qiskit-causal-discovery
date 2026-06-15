@@ -393,7 +393,7 @@ def draw_dag(
                 y_coord = -(y - (len(nodes)-1)/2.0) * 1.5
                 y_jitter = 0.2 if x % 2 == 0 else -0.2
                 pos[node] = (x * 2.5, y_coord + y_jitter)
-    except:
+    except Exception:
         pos = nx.spring_layout(G, k=1.5, seed=42)
 
     missing = [n for n in variables if n not in pos]
@@ -779,7 +779,7 @@ def call_groq(api_key: str, prompt: str, cache_key: str, fallback: str | None = 
     except Exception as exc:
         result = compact_groq_error(str(exc))
     result = append_local_fallback(result, fallback)
-    st.session_state[state_key] = result
+    # 에러 응답은 캐싱하지 않음 — 재시도 시 다시 호출되도록
     return result
 
 
