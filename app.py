@@ -741,11 +741,17 @@ def groq_error_message(http_error: urllib.error.HTTPError) -> str:
     return f"{http_error.code} {body.strip() or http_error.reason}"
 
 
+def groq_state_key(api_key: str, cache_key: str) -> str:
+    api_key_digest = hashlib.sha1(api_key.encode("utf-8")).hexdigest()[:8]
+    return f"groq_{api_key_digest}_{cache_key}"
+
+
 def call_groq(api_key: str, prompt: str, cache_key: str, fallback: str | None = None) -> str:
     """Call Groq Chat Completions and cache the generated interpretation."""
-    state_key = f"groq_{cache_key}"
-    if state_key in st.session_state:
-        return st.session_state[state_key]
+    state_key = groq_state_key(api_key, cache_key)
+    cached = st.session_state.get(state_key)
+    if cached and not str(cached).startswith("AI 해석 생성 실패"):
+        return cached
 
     payload = {
         "model": GROQ_MODEL,
@@ -789,7 +795,7 @@ def call_groq(api_key: str, prompt: str, cache_key: str, fallback: str | None = 
     except Exception as exc:
         result = compact_groq_error(str(exc))
     result = append_local_fallback(result, fallback)
-    # 에러 응답은 캐싱하지 않음 — 재시도 시 다시 호출되도록
+    st.session_state[state_key] = result
     return result
 
 
@@ -1966,7 +1972,7 @@ with tabs[1]:
         if st.button("AI 해석 생성", key="ai_btn_structure"):
             with st.spinner("Groq가 구조를 해석하는 중..."):
                 call_groq(groq_api_key, _ai_prompt_structure, _cache_key_s, _local_structure_summary)
-        _cached_s = st.session_state.get(f"groq_{_cache_key_s}")
+        _cached_s = st.session_state.get(groq_state_key(groq_api_key, _cache_key_s))
         if _cached_s:
             render_ai_box(_cached_s)
 
@@ -2102,17 +2108,13 @@ with tabs[2]:
             "3) 정답 구조나 결과 변수 변경으로 다시 확인해야 한다는 점"
         )
         _ai_prompt_intv = (
-            f"당신은 인과 추론 전문가입니다. 아래의 '개입 효과 분석(do-calculus)' 결과를 바탕으로, 실제 현장에서 어떤 조치를 취해야 {outcome}을 {'증가' if outcome_higher_is_better else '감소'}시킬 수 있는지에 대한 전략 보고서를 작성하세요.\n\n"
-            f"### 포함될 내용:\n"
-            f"1. **최적의 개입 타겟**: 효과가 가장 강력한 변수와 구체적인 조치 방향(예: X를 높여야 함)\n"
-            f"2. **기대 효과**: 해당 조치를 취했을 때 {outcome}이 통계적으로 어느 정도 변화할 것으로 예상되는지 설명\n"
-            f"3. **데이터 기반 신뢰도**: Coverage 지표를 바탕으로 이 추천이 얼마나 많은 데이터 근거를 가졌는지 설명\n"
-            f"4. **우선순위 제언**: 여러 변수 중 무엇부터 건드려야 비용 대비 효율적인지 제안\n\n"
-            f"### 분석 데이터:\n"
+            f"당신은 인과 추론 전문가입니다. 아래 개입 효과 분석 결과를 바탕으로 한국어 전략 보고서를 작성하세요.\n\n"
             f"- 결과 변수({'높이고 싶은 것' if outcome_higher_is_better else '줄이고 싶은 것'}): {outcome}\n"
             f"- 사용한 인과 구조: {_ai_edges_intv}\n"
             f"- 개입 효과 요약:\n{_intv_summary}\n\n"
-            f"전문적인 컨설팅 보고서 스타일로 작성하되, 'do-calculus', 'backdoor' 같은 용어는 '인과 관계 보정법' 등으로 쉽게 풀어서 설명하세요."
+            f"작성 지침:\n{_intv_instructions}\n\n"
+            f"추천 가능한 개입이 없으면 새로운 타겟을 만들어내지 말고, 추천 불가 사유를 명확히 설명하세요. "
+            f"'do-calculus', 'backdoor' 같은 용어는 '인과 관계 보정법' 등으로 쉽게 풀어서 설명하세요."
         )
         _cache_key_i = prompt_cache_key("intervention", _ai_prompt_intv)
         if _has_actionable_intv:
@@ -2130,7 +2132,7 @@ with tabs[2]:
         if st.button("AI 해석 생성", key="ai_btn_intervention"):
             with st.spinner("Groq가 개입 결과를 해석하는 중..."):
                 call_groq(groq_api_key, _ai_prompt_intv, _cache_key_i, _local_intv_summary)
-        _cached_i = st.session_state.get(f"groq_{_cache_key_i}")
+        _cached_i = st.session_state.get(groq_state_key(groq_api_key, _cache_key_i))
         if _cached_i:
             render_ai_box(_cached_i)
 
@@ -2282,7 +2284,7 @@ with tabs[3]:
             if st.button("양자 결과 AI 해석 생성", key="ai_btn_quantum"):
                 with st.spinner("Groq가 양자 실험 결과를 분석 중..."):
                     call_groq(groq_api_key, _ai_prompt_quantum, _cache_key_q, _local_q_summary)
-            _cached_q = st.session_state.get(f"groq_{_cache_key_q}")
+            _cached_q = st.session_state.get(groq_state_key(groq_api_key, _cache_key_q))
             if _cached_q:
                 render_ai_box(_cached_q)
     else:
@@ -2408,7 +2410,7 @@ with tabs[4]:
 
     # ── AI Synthesis ──
     if ai_enabled:
-        st.markdown("#### 🏁 인과 추론 및 양자 분석 최종 보고서")
+        st.markdown("#### 인과 추론 및 양자 분석 최종 보고서")
         _ai_edges_syn = format_edges(best_graph.edges())
         _ai_gt_syn = f"정답 구조: {format_edges(ground_truth.edges())}, F1={best_metrics['f1']:.2f}" if has_ground_truth and best_metrics else "정답 구조 없음"
         _ai_grover_syn = "Grover 미실행"
@@ -2417,19 +2419,24 @@ with tabs[4]:
                 f"Grover 결과: {n_edges}큐비트 회로, Oracle 적중률 {active_grover_r['good_probability']*100:.1f}%, "
                 f"증폭률 {active_grover_r['good_probability']/(top_k_effective/2**n_edges):.1f}배"
             )
-        _ai_intv_syn = ""
+        _ai_intv_syn = "개입 효과를 계산할 후보 변수가 없음"
+        _decision_instruction = "개입 후보가 없으므로 추천 타겟을 새로 만들지 말고 한계를 설명"
         _intv_preview = intervention_table(data, best_graph, variables, outcome, outcome_higher_is_better)
         if not _intv_preview.empty:
             if has_actionable_intervention(_intv_preview):
                 _top = _intv_preview.iloc[0]
                 _ai_intv_syn = f"핵심 개입 타겟: {_top['target']} ({_top['recommended_action']}, 효과={_top['effect_high_minus_low']:.4f})"
+                _decision_instruction = f"{outcome}을 {'높이기' if outcome_higher_is_better else '낮추기'} 위해 {_ai_intv_syn} 조치가 필요한 이유와 기대 효과"
+            else:
+                _ai_intv_syn = "선택한 DAG 기준 추천 가능한 개입 없음(effect=0 또는 directed path 없음)"
+                _decision_instruction = "추천 가능한 개입이 없다는 판단 근거와, 정답 구조 또는 결과 변수 변경으로 재확인해야 한다는 점"
 
         _ai_prompt_syn = (
             f"당신은 인과 추론과 양자 컴퓨팅(Qiskit) 전문가입니다. 이 프로젝트의 전체 결과를 종합하여 최종 분석 보고서를 작성하세요.\n\n"
             f"### 보고서 구성 항목:\n"
             f"1. **데이터 기반 인과 구조 분석**: {dataset_name} 데이터에서 발견된 최적의 인과 관계({_ai_edges_syn})가 도메인 관점에서 어떤 의미를 갖는지 설명\n"
             f"2. **양자 알고리즘(Grover)의 역할**: Qiskit을 이용한 Grover 탐색이 인과 구조 탐색이라는 비정렬 탐색 문제에 어떻게 적용되었으며, {_ai_grover_syn} 결과가 갖는 방법론적 의미 설명\n"
-            f"3. **의사결정 제언**: {outcome}을 {'높이기' if outcome_higher_is_better else '낮추기'} 위해 {_ai_intv_syn} 조치가 필요한 이유와 기대 효과\n"
+            f"3. **의사결정 제언**: {_decision_instruction}\n"
             f"4. **기술적 의의와 향후 전망**: 인과 추론과 양자 알고리즘을 결합한 이 시도가 데이터 과학 분야에서 어떤 가능성을 제시하는지 정리\n\n"
             f"### 참고 데이터:\n"
             f"- 정답 구조 일치도: {(_ai_gt_syn)}\n- 분석 모델: Qiskit Aer Simulator (Grover Search)\n"
@@ -2438,15 +2445,15 @@ with tabs[4]:
         )
         _cache_key_syn = prompt_cache_key("synthesis", _ai_prompt_syn)
         _local_syn_summary = (
-            f"{dataset_name} 데이터 분석 결과, {outcome}에 대한 최적의 인과 구조와 개입 타겟을 식별했습니다. "
+            f"{dataset_name} 데이터 분석 결과, {outcome}에 대한 DAG 후보를 점수화했습니다. "
             f"특히 Qiskit Grover 알고리즘을 통해 수많은 DAG 후보 중 고득점 구조를 양자적으로 탐색할 수 있음을 확인했습니다. "
-            f"최종 추천 개입은 {_ai_intv_syn}입니다."
+            f"개입 판단은 {_ai_intv_syn}입니다."
         )
 
         if st.button("AI 종합 보고서 생성", key="ai_btn_synthesis"):
             with st.spinner("Groq가 전체 분석을 종합 중..."):
                 call_groq(groq_api_key, _ai_prompt_syn, _cache_key_syn, _local_syn_summary)
-        _cached_syn = st.session_state.get(f"groq_{_cache_key_syn}")
+        _cached_syn = st.session_state.get(groq_state_key(groq_api_key, _cache_key_syn))
         if _cached_syn:
             render_ai_box(_cached_syn)
     else:
