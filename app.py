@@ -357,15 +357,28 @@ def score_from_csv_bytes(
 
 def known_layout(variables: list[str]) -> dict[str, tuple[float, float]] | None:
     protein_pos = {
-        "Raf": (0.0, 0.45), "Mek": (1.0, 0.45), "Erk": (2.0, 0.45), "Akt": (1.5, -0.35),
-        "PKA": (-0.2, -0.35), "PKC": (-0.2, 1.05),
+        "Raf": (0.0, 0.45),
+        "Mek": (1.0, 0.45),
+        "Erk": (2.0, 0.45),
+        "Akt": (1.5, -0.35),
+        "PKA": (-0.2, -0.35),
+        "PKC": (-0.2, 1.05),
     }
     sprinkler_pos = {
-        "Cloudy": (0.0, 1.0), "Sprinkler": (-0.9, 0.1), "Rain": (0.9, 0.1), "Wet_Grass": (0.0, -0.75),
+        "Cloudy": (0.0, 1.0),
+        "Sprinkler": (-0.9, 0.1),
+        "Rain": (0.9, 0.1),
+        "Wet_Grass": (0.0, -0.75),
     }
     asia_pos = {
-        "asia": (-1.2, 1.0), "tub": (-1.2, 0.25), "smoke": (0.2, 1.0), "lung": (0.0, 0.25),
-        "bronc": (1.0, 0.25), "either": (-0.45, -0.45), "xray": (-1.0, -1.2), "dysp": (0.45, -1.2),
+        "asia": (-1.2, 1.0),
+        "tub": (-1.2, 0.25),
+        "smoke": (0.2, 1.0),
+        "lung": (0.0, 0.25),
+        "bronc": (1.0, 0.25),
+        "either": (-0.45, -0.45),
+        "xray": (-1.0, -1.2),
+        "dysp": (0.45, -1.2),
     }
     for layout in (protein_pos, sprinkler_pos, asia_pos):
         if all(var in layout for var in variables):
@@ -380,83 +393,90 @@ def draw_dag(
     reference: nx.DiGraph | None = None,
     subtitle: str | None = None,
 ) -> plt.Figure:
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig, ax = plt.subplots(figsize=(4.8, 3.8))
     fig.patch.set_facecolor("#ffffff")
-    
-    G = graph.copy()
-    G.add_nodes_from(variables)
-    
-    # 1. 동적 레이아웃 (계층형 우선, 실패 시 스프링)
+    ax.set_facecolor("#ffffff")
+    graph = graph.copy()
+    graph.add_nodes_from(variables)
+
     pos = known_layout(variables)
     if pos is None:
-        if nx.is_directed_acyclic_graph(G) and len(G.edges()) > 0:
-            try:
-                layers = list(nx.topological_generations(G))
-                pos = {}
-                for x, nodes in enumerate(layers):
-                    nodes = sorted(nodes)
-                    for y, node in enumerate(nodes):
-                        pos[node] = (x * 2.0, -(y - (len(nodes)-1)/2.0))
-            except:
-                pos = nx.spring_layout(G, k=1.2, seed=42)
+        if nx.is_directed_acyclic_graph(graph) and len(graph.edges()) > 0:
+            generations = list(nx.topological_generations(graph))
+            pos = {}
+            for layer_idx, layer in enumerate(generations):
+                layer = sorted(layer)
+                for item_idx, node in enumerate(layer):
+                    pos[node] = (layer_idx, -item_idx)
+            missing = [node for node in variables if node not in pos]
+            for idx, node in enumerate(missing):
+                pos[node] = (0, -idx)
         else:
-            # 엣지가 없거나 순환이 있으면 깔끔하게 원형/그리드 배치
-            pos = nx.circular_layout(G)
+            pos = nx.spring_layout(graph, seed=7)
 
-    # 2. 노드 스타일
+    # Shadow nodes for depth effect
+    shadow_pos = {k: (v[0] + 0.015, v[1] - 0.015) for k, v in pos.items()}
+    nx.draw_networkx_nodes(
+        graph, shadow_pos, ax=ax,
+        node_color="#e2e8f0", node_size=1600, edgecolors="none", linewidths=0, alpha=0.5,
+    )
+
     node_colors = []
-    for node in G.nodes():
-        if G.out_degree(node) > 0 and G.in_degree(node) == 0:
-            node_colors.append("#eef2ff")
-        elif G.out_degree(node) == 0:
-            node_colors.append("#fef3c7")
+    for node in graph.nodes():
+        if graph.out_degree(node) > 0 and graph.in_degree(node) == 0:
+            node_colors.append("#eef2ff")  # source: indigo tint
+        elif graph.out_degree(node) == 0:
+            node_colors.append("#fef3c7")  # sink: amber tint
         else:
-            node_colors.append("#f0fdf4")
+            node_colors.append("#f0fdf4")  # intermediate: green tint
 
     nx.draw_networkx_nodes(
-        G, pos, ax=ax,
-        node_color=node_colors, node_size=1800,
-        edgecolors="#334155", linewidths=1.2
+        graph, pos, ax=ax,
+        node_color=node_colors, node_size=1600,
+        edgecolors="#334155", linewidths=2.0,
     )
-    
     nx.draw_networkx_labels(
-        G, pos, ax=ax, font_size=9, font_weight="bold", font_color="#1e293b"
+        graph, pos, ax=ax,
+        font_size=10.5, font_weight="bold", font_color="#1e293b",
     )
 
-    # 3. 화살표 스타일 (전문가용 크기 적용)
-    import matplotlib.patches as patches
-    ref_edges = set(reference.edges()) if reference is not None else set()
-    
-    for u, v in G.edges():
-        color = "#6366f1"
-        if reference is not None:
-            color = "#059669" if (u, v) in ref_edges else "#ef4444"
+    edge_colors = []
+    widths = []
+    styles = []
+    reference_edges = set(reference.edges()) if reference is not None else set()
+    for edge in graph.edges():
+        if reference is None:
+            edge_colors.append("#6366f1")
+            widths.append(2.5)
+            styles.append("solid")
+        elif edge in reference_edges:
+            edge_colors.append("#059669")
+            widths.append(3.0)
+            styles.append("solid")
+        else:
+            edge_colors.append("#ef4444")
+            widths.append(2.5)
+            styles.append("solid")
 
-        arrow = patches.FancyArrowPatch(
-            pos[u], pos[v],
-            arrowstyle='-|>,head_length=4,head_width=2',
+    if graph.edges():
+        nx.draw_networkx_edges(
+            graph, pos, ax=ax,
+            edge_color=edge_colors, width=widths,
+            arrows=True, arrowsize=24,
             connectionstyle="arc3,rad=0.1",
-            color=color,
-            linewidth=1.8,
-            mutation_scale=10,
-            shrinkA=18,
-            shrinkB=18,
-            zorder=1,
-            alpha=0.8
+            min_source_margin=20, min_target_margin=20,
+            arrowstyle="-|>", node_size=1600,
         )
-        ax.add_patch(arrow)
 
-    # 4. 마무리
-    ax.set_title(title, fontsize=12, fontweight="bold", pad=15)
+    ax.set_title(title, fontsize=12.5, fontweight="bold", pad=16, color="#0f172a")
     if subtitle:
         ax.text(
-            0.5, -0.05, subtitle, transform=ax.transAxes,
-            ha="center", va="top", fontsize=8.5, color="#64748b",
-            bbox=dict(boxstyle="round,pad=0.3", fc="#f8fafc", ec="#e2e8f0", alpha=0.8)
+            0.5, -0.06, subtitle, transform=ax.transAxes,
+            ha="center", va="top", fontsize=9,
+            color="#6366f1", fontweight="medium",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#eef2ff", edgecolor="#c7d2fe", alpha=0.8),
         )
-    
     ax.axis("off")
-    ax.margins(0.2)
     fig.tight_layout()
     return fig
 
