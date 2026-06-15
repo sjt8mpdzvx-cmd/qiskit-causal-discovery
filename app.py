@@ -460,20 +460,6 @@ def draw_dag(
     fig.tight_layout()
     return fig
 
-    # 4. 축 범위 및 제목
-    ax.set_title(title, fontsize=13, fontweight="bold", pad=15)
-    if subtitle:
-        ax.text(
-            0.5, -0.02, subtitle, transform=ax.transAxes,
-            ha="center", va="top", fontsize=9, color="#475569",
-            bbox=dict(boxstyle="round,pad=0.3", fc="#f8fafc", ec="#e2e8f0", alpha=0.8)
-        )
-    
-    ax.axis("off")
-    ax.margins(0.15)
-    fig.tight_layout()
-    return fig
-
 
 def plot_correlation(data: pd.DataFrame) -> plt.Figure:
     numeric = data.apply(pd.to_numeric, errors="coerce")
@@ -497,6 +483,21 @@ def plot_correlation(data: pd.DataFrame) -> plt.Figure:
         for j in range(len(corr.columns)):
             value = corr.iloc[i, j]
             if np.isfinite(value):
+                text_color = "#ffffff" if abs(value) > 0.6 else "#334155"
+                ax.text(j, i, f"{value:.2f}", ha="center", va="center", fontsize=9.5, fontweight="bold", color=text_color)
+    ax.set_title("Correlation Matrix", fontsize=12, fontweight="bold", color="#0f172a")
+
+    # Rounded edges on spines
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    cbar = fig.colorbar(im, ax=ax, shrink=0.78, pad=0.04)
+    cbar.outline.set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+def plot_score_distribution(scored: list[tuple[str, nx.DiGraph, float]], good_bitstrings: list[str]) -> plt.Figure:
     scores = np.array([item[2] for item in scored])
     fig, ax = plt.subplots(figsize=(6.2, 3.8))
     fig.patch.set_facecolor("#ffffff")
