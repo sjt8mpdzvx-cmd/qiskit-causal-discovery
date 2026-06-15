@@ -706,7 +706,7 @@ def prompt_cache_key(prefix: str, prompt: str) -> str:
 
 
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
 def compact_groq_error(errors: list[str] | str) -> str:
@@ -774,6 +774,7 @@ def call_groq(api_key: str, prompt: str, cache_key: str, fallback: str | None = 
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             },
             method="POST",
         )
