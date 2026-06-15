@@ -408,14 +408,15 @@ def draw_dag(
                 layer = sorted(layer)
                 n_in_layer = len(layer)
                 for item_idx, node in enumerate(layer):
-                    # 중앙 정렬을 위한 좌표 계산
-                    x_coord = layer_idx
-                    y_coord = -(item_idx - (n_in_layer - 1) / 2.0)
+                    # 레이어 간격(x)을 벌리고, 레이어 내 간격(y)도 최적화
+                    x_coord = layer_idx * 1.5
+                    y_coord = -(item_idx - (n_in_layer - 1) / 2.0) * 1.2
                     pos[node] = (x_coord, y_coord)
             
             missing = [node for node in variables if node not in pos]
             for idx, node in enumerate(missing):
-                pos[node] = (-1, -(idx - (len(missing) - 1) / 2.0))
+                # 엣지 없는 노드는 왼쪽 멀리 배치
+                pos[node] = (-1.0, -(idx - (len(missing) - 1) / 2.0) * 1.2)
         else:
             pos = nx.shell_layout(graph)
 
@@ -481,18 +482,6 @@ def draw_dag(
             bbox=dict(boxstyle="round,pad=0.4", facecolor="#f8fafc", edgecolor="#e2e8f0", alpha=0.9),
         )
     
-    ax.axis("off")
-    fig.tight_layout()
-    return fig
-
-    ax.set_title(title, fontsize=12.5, fontweight="bold", pad=16, color="#0f172a")
-    if subtitle:
-        ax.text(
-            0.5, -0.06, subtitle, transform=ax.transAxes,
-            ha="center", va="top", fontsize=9,
-            color="#6366f1", fontweight="medium",
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="#eef2ff", edgecolor="#c7d2fe", alpha=0.8),
-        )
     ax.axis("off")
     fig.tight_layout()
     return fig
