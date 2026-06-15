@@ -647,12 +647,36 @@ def prompt_cache_key(prefix: str, prompt: str) -> str:
     return f"{prefix}_{digest}"
 
 
-def call_gemini(api_key: str, prompt: str, cache_key: str) -> str:
+def compact_gemini_error(errors: list[str] | str) -> str:
+    """Convert verbose provider errors into an actionable short message."""
+    text = " | ".join(errors) if isinstance(errors, list) else str(errors)
+    if "429" in text or "quota" in text.lower() or "Quota exceeded" in text:
+        return (
+            "AI 해석 생성 실패: Gemini API 할당량이 초과되었거나 현재 API key의 무료 할당량이 0입니다. "
+            "Google AI Studio에서 다른 API key를 만들거나, 해당 Google Cloud 프로젝트의 billing/quota 설정을 확인하세요."
+        )
+    if "404" in text and "not found" in text.lower():
+        return (
+            "AI 해석 생성 실패: 현재 API key/API 버전에서 요청한 Gemini 모델을 사용할 수 없습니다. "
+            "Google AI Studio에서 사용 가능한 모델이 연결된 API key인지 확인하세요."
+        )
+    if "API key" in text or "permission" in text.lower() or "403" in text:
+        return "AI 해석 생성 실패: Gemini API key 권한 또는 인증 설정을 확인하세요."
+    return f"AI 해석 생성 실패: {text}"
+
+
+def append_local_fallback(message: str, fallback: str | None) -> str:
+    if not fallback:
+        return message
+    return f"{message}\n\nGemini 없이 표시하는 로컬 요약:\n{fallback}"
+
+
+def call_gemini(api_key: str, prompt: str, cache_key: str, fallback: str | None = None) -> str:
     """Gemini API를 호출해 자연어 해석을 생성한다. session_state에 캐싱."""
     state_key = f"gemini_{cache_key}"
     if state_key in st.session_state:
         return st.session_state[state_key]
-    model_candidates = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    model_candidates = ["gemini-2.0-flash"]
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
@@ -669,9 +693,10 @@ def call_gemini(api_key: str, prompt: str, cache_key: str) -> str:
                 errors.append(f"{model_name}: empty response")
             except Exception as model_exc:
                 errors.append(f"{model_name}: {model_exc}")
-        result = "AI 해석 생성 실패: " + " | ".join(errors)
+        result = compact_gemini_error(errors)
     except Exception as exc:
-        result = f"AI 해석 생성 실패: {exc}"
+        result = compact_gemini_error(str(exc))
+    result = append_local_fallback(result, fallback)
     st.session_state[state_key] = result
     return result
 
@@ -1798,9 +1823,15 @@ with tabs[1]:
             f"1) 발견된 인과 화살표가 각각 무엇을 뜻하는지, 2) 이 구조가 얼마나 신뢰할 수 있는지 설명하세요."
         )
         _cache_key_s = prompt_cache_key("structure", _ai_prompt_structure)
+        _local_structure_summary = (
+            f"BDeu 1위 구조는 {_ai_edges}입니다. "
+            f"{_ai_gt_text.replace(chr(10), ' ')}. "
+            "관측 데이터만으로는 Markov equivalence와 숨은 변수 때문에 정답 방향을 완전히 보장할 수 없으므로, "
+            "이 결과는 가능한 DAG 후보 중 데이터에 가장 잘 맞는 탐색 결과로 해석해야 합니다."
+        )
         if st.button("AI 해석 생성", key="ai_btn_structure"):
             with st.spinner("Gemini가 구조를 해석하는 중..."):
-                call_gemini(gemini_api_key, _ai_prompt_structure, _cache_key_s)
+                call_gemini(gemini_api_key, _ai_prompt_structure, _cache_key_s, _local_structure_summary)
         _cached_s = st.session_state.get(f"gemini_{_cache_key_s}")
         if _cached_s:
             render_ai_box(_cached_s)
@@ -1911,9 +1942,15 @@ with tabs[2]:
             f"3) 실제로 이 결과를 어떻게 활용할 수 있는지 한 줄 제안"
         )
         _cache_key_i = prompt_cache_key("intervention", _ai_prompt_intv)
+        _top_intv = intervention.iloc[0]
+        _local_intv_summary = (
+            f"가장 큰 개입 효과를 보인 변수는 {_top_intv['target']}입니다. "
+            f"권장 행동은 {_top_intv['recommended_action']}이고, 효과 크기는 {_top_intv['effect_high_minus_low']:.4f}입니다. "
+            f"coverage는 {_top_intv['coverage']:.0%}로, coverage가 낮을수록 관측 가능한 조건 조합이 부족해 해석을 보수적으로 해야 합니다."
+        )
         if st.button("AI 해석 생성", key="ai_btn_intervention"):
             with st.spinner("Gemini가 개입 결과를 해석하는 중..."):
-                call_gemini(gemini_api_key, _ai_prompt_intv, _cache_key_i)
+                call_gemini(gemini_api_key, _ai_prompt_intv, _cache_key_i, _local_intv_summary)
         _cached_i = st.session_state.get(f"gemini_{_cache_key_i}")
         if _cached_i:
             render_ai_box(_cached_i)
@@ -2243,9 +2280,14 @@ with tabs[4]:
             f"종합 요약: 이 데이터에서 무엇을 알 수 있고, 어떤 행동을 권고할 수 있는지 정리하세요."
         )
         _cache_key_syn = prompt_cache_key("synthesis", _ai_prompt_syn)
+        _local_syn_summary = (
+            f"{dataset_name} 데이터에서 BDeu 1위 DAG는 {_ai_edges_syn}입니다. "
+            f"{_ai_gt_syn}. {_ai_intv_syn}. "
+            "이 앱은 완전한 인과 증명이 아니라, DAG 후보를 점수화하고 개입 후보를 비교하는 탐색형 도구입니다."
+        )
         if st.button("AI 종합 해석 생성", key="ai_btn_synthesis"):
             with st.spinner("Gemini가 종합 분석을 생성하는 중..."):
-                call_gemini(gemini_api_key, _ai_prompt_syn, _cache_key_syn)
+                call_gemini(gemini_api_key, _ai_prompt_syn, _cache_key_syn, _local_syn_summary)
         _cached_syn = st.session_state.get(f"gemini_{_cache_key_syn}")
         if _cached_syn:
             render_ai_box(_cached_syn)
