@@ -2472,7 +2472,6 @@ with tabs[4]:
             "이 앱은 완전한 인과 증명이 아니라, DAG 후보를 점수화하고 개입 후보를 비교하는 탐색형 도구입니다."
         )
         if st.button("AI 종합 해석 생성", key="ai_btn_synthesis"):
-        if st.button("AI 종합 해석 생성", key="ai_btn_synthesis"):
             with st.spinner("Groq가 종합 분석을 생성하는 중..."):
                 call_groq(groq_api_key, _ai_prompt_syn, _cache_key_syn, _local_syn_summary)
         _cached_syn = st.session_state.get(f"groq_{_cache_key_syn}")
