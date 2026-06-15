@@ -464,8 +464,8 @@ def draw_dag(
     if reference is not None:
         from matplotlib.patches import Patch
         legend_elements = [
-            Patch(facecolor="#059669", label="정답 일치"),
-            Patch(facecolor="#ef4444", label="정답에 없음"),
+            Patch(facecolor="#059669", label="Correct"),
+            Patch(facecolor="#ef4444", label="Wrong / Extra"),
         ]
         ax.legend(handles=legend_elements, loc="lower right", fontsize=8, framealpha=0.9,
                   edgecolor="#e2e8f0", fancybox=True)
