@@ -393,93 +393,109 @@ def draw_dag(
     reference: nx.DiGraph | None = None,
     subtitle: str | None = None,
 ) -> plt.Figure:
-    fig, ax = plt.subplots(figsize=(5.5, 4.5))
+    fig, ax = plt.subplots(figsize=(6, 4.5))
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
-    graph = graph.copy()
-    graph.add_nodes_from(variables)
+    
+    # 노드 추가 (엣지 없는 노드 포함)
+    G = graph.copy()
+    G.add_nodes_from(variables)
 
+    # 1. 레이아웃 결정
     pos = known_layout(variables)
     if pos is None:
-        if nx.is_directed_acyclic_graph(graph) and len(graph.edges()) > 0:
-            generations = list(nx.topological_generations(graph))
+        if nx.is_directed_acyclic_graph(G) and len(G.edges()) > 0:
+            generations = list(nx.topological_generations(G))
             pos = {}
             for layer_idx, layer in enumerate(generations):
                 layer = sorted(layer)
                 n_in_layer = len(layer)
                 for item_idx, node in enumerate(layer):
-                    # 레이어 간격(x)을 벌리고, 레이어 내 간격(y)도 최적화
-                    x_coord = layer_idx * 1.5
-                    y_coord = -(item_idx - (n_in_layer - 1) / 2.0) * 1.2
-                    pos[node] = (x_coord, y_coord)
+                    x = layer_idx * 2.0  # 가로 간격 대폭 확대
+                    y = -(item_idx - (n_in_layer - 1) / 2.0) * 1.5 # 세로 중앙 정렬
+                    pos[node] = (x, y)
             
+            # 레이아웃에 포함되지 않은 노드 처리
             missing = [node for node in variables if node not in pos]
             for idx, node in enumerate(missing):
-                # 엣지 없는 노드는 왼쪽 멀리 배치
-                pos[node] = (-1.0, -(idx - (len(missing) - 1) / 2.0) * 1.2)
+                pos[node] = (-1.5, -(idx - (len(missing) - 1) / 2.0) * 1.5)
         else:
-            pos = nx.shell_layout(graph)
+            pos = nx.circular_layout(G)
 
-    # 노드 스타일 설정
+    # 2. 노드 그리기
     node_colors = []
-    for node in graph.nodes():
-        if graph.out_degree(node) > 0 and graph.in_degree(node) == 0:
-            node_colors.append("#eef2ff")  # 원인 노드: 연한 인디고
-        elif graph.out_degree(node) == 0:
-            node_colors.append("#fef3c7")  # 결과 노드: 연한 앰버
+    for node in G.nodes():
+        if G.out_degree(node) > 0 and G.in_degree(node) == 0:
+            node_colors.append("#eef2ff") # Source
+        elif G.out_degree(node) == 0:
+            node_colors.append("#fef3c7") # Sink
         else:
-            node_colors.append("#f0fdf4")  # 중간 노드: 연한 그린
+            node_colors.append("#f0fdf4") # Mid
 
     nx.draw_networkx_nodes(
-        graph, pos, ax=ax,
-        node_color=node_colors, node_size=2000,
-        edgecolors="#334155", linewidths=1.5,
+        G, pos, ax=ax,
+        node_color=node_colors, node_size=1500,
+        edgecolors="#334155", linewidths=1.5, alpha=0.95
     )
     
     nx.draw_networkx_labels(
-        graph, pos, ax=ax,
-        font_size=10, font_weight="bold", font_color="#1e293b",
+        G, pos, ax=ax,
+        font_size=9, font_weight="bold", font_color="#1e293b"
     )
 
-    # 엣지 스타일 설정
-    reference_edges = set(reference.edges()) if reference is not None else set()
-    for edge in graph.edges():
-        src, dst = edge
-        color = "#6366f1"  # 기본 색상
-        width = 2.0
-        alpha = 0.8
+    # 3. 정밀한 화살표 그리기 (FancyArrowPatch)
+    import matplotlib.patches as patches
+    ref_edges = set(reference.edges()) if reference is not None else set()
+    
+    for u, v in G.edges():
+        color = "#6366f1" # Default Indigo
+        width = 1.5
         
         if reference is not None:
-            if edge in reference_edges:
-                color = "#059669"  # 정답 일치: 그린
-                width = 2.5
-            else:
-                color = "#ef4444"  # 정답 불일치: 레드
+            if (u, v) in ref_edges:
+                color = "#059669" # Correct (Green)
                 width = 2.0
+            else:
+                color = "#ef4444" # Incorrect (Red)
+                width = 1.5
 
-        ax.annotate(
-            "",
-            xy=pos[dst], xycoords='data',
-            xytext=pos[src], textcoords='data',
-            arrowprops=dict(
-                arrowstyle="-|>",
-                color=color,
-                linewidth=width,
-                shrinkA=22, shrinkB=22,
-                patchA=None, patchB=None,
-                connectionstyle="arc3,rad=0", # 직선으로 변경
-                mutation_scale=20,
-                alpha=alpha
-            ),
+        # 노드 중심이 아닌 테두리에서 시작하고 끝나도록 좌표 보정
+        start_pos = np.array(pos[u])
+        end_pos = np.array(pos[v])
+        vec = end_pos - start_pos
+        dist = np.linalg.norm(vec)
+        if dist == 0: continue
+        
+        # 노드 반지름(약 0.25)만큼 안쪽으로 줄임
+        start_adj = start_pos + (vec / dist) * 0.3
+        end_adj = end_pos - (vec / dist) * 0.3
+        
+        arrow = patches.FancyArrowPatch(
+            start_adj, end_adj,
+            arrowstyle='-|>,head_length=5,head_width=3',
+            connectionstyle="arc3,rad=0.05", # 겹침 방지용 미세한 곡선
+            color=color,
+            linewidth=width,
+            mutation_scale=15,
+            zorder=1,
+            alpha=0.8
         )
+        ax.add_patch(arrow)
 
-    ax.set_title(title, fontsize=13, fontweight="bold", pad=20, color="#0f172a")
+    # 4. 축 범위 및 제목 설정
+    all_pos = np.array(list(pos.values()))
+    x_min, y_min = np.min(all_pos, axis=0) - 1.0
+    x_max, y_max = np.max(all_pos, axis=0) + 1.0
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    
+    ax.set_title(title, fontsize=12, fontweight="bold", pad=15, color="#0f172a")
     if subtitle:
         ax.text(
-            0.5, -0.05, subtitle, transform=ax.transAxes,
-            ha="center", va="top", fontsize=9.5,
-            color="#475569", fontweight="medium",
-            bbox=dict(boxstyle="round,pad=0.4", facecolor="#f8fafc", edgecolor="#e2e8f0", alpha=0.9),
+            0.5, -0.02, subtitle, transform=ax.transAxes,
+            ha="center", va="top", fontsize=8.5,
+            color="#64748b", fontweight="medium",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#f8fafc", edgecolor="#e2e8f0", alpha=0.8),
         )
     
     ax.axis("off")
