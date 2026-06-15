@@ -706,7 +706,7 @@ def prompt_cache_key(prefix: str, prompt: str) -> str:
 
 
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 
 def compact_groq_error(errors: list[str] | str) -> str:
