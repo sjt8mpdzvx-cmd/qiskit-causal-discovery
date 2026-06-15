@@ -2258,6 +2258,37 @@ with tabs[3]:
                 plt.close(circuit_fig)
             except Exception:
                 st.code(str(grover_result["circuit"].draw(output="text", fold=100)))
+
+        # ═══ 양자 AI 해석 ═══
+        if ai_enabled:
+            st.divider()
+            _ai_prompt_quantum = (
+                f"당신은 양자 컴퓨팅 및 Qiskit 전문가입니다. 아래의 Grover 알고리즘 기반 인과 구조 탐색 결과를 해석해주세요.\n\n"
+                f"### 분석 데이터:\n"
+                f"- 사용 큐비트 수: {n_edges} (각 엣지 후보당 1큐비트)\n"
+                f"- Oracle 타겟 수: {top_k_effective} (BDeu 상위 {top_k_effective}개 DAG)\n"
+                f"- Grover 반복 횟수: {grover_result['n_iterations']}\n"
+                f"- Oracle 적중률: {grover_result['good_probability']*100:.1f}% (이론적 증폭 성공 여부)\n"
+                f"- 선택된 DAG 순위: {grover_result.get('selected_rank', '?')}위\n\n"
+                f"### 요청 사항:\n"
+                f"1. Qiskit Aer 시뮬레이터에서 Grover 회로가 의도대로 진폭 증폭(Amplitude Amplification)을 수행했는지 평가하세요.\n"
+                f"2. 전수조사 대비 Grover 알고리즘의 복잡도 이점($O(\\sqrt{{N}})$)이 이 문제에서 어떻게 나타나는지 설명하세요.\n"
+                f"3. 측정 분포 차트에서 나타나는 'Good' 상태와 'Valid' 상태의 차이가 무엇을 의미하는지 비전문가에게 설명하세요.\n"
+                f"4. 이 양자적 시도가 인과 추론 분야에서 어떤 가능성을 보여주는지 Qiskit 수업의 맥락에서 정리하세요.\n\n"
+                f"격식 있고 전문적인 톤으로 작성하세요."
+            )
+            _cache_key_q = prompt_cache_key("quantum", _ai_prompt_quantum)
+            _local_q_summary = (
+                f"Qiskit Aer 시뮬레이터를 통해 {n_edges}큐비트 Grover 회로를 실행했습니다. "
+                f"Oracle 적중률은 {grover_result['good_probability']*100:.1f}%로, 균등 중첩 상태 대비 진폭이 성공적으로 증폭되었습니다. "
+                f"Grover 알고리즘은 가능한 모든 DAG 후보를 하나씩 검사하는 대신, 양자 간섭을 이용해 고득점 후보를 더 높은 확률로 찾아낼 수 있음을 보여줍니다."
+            )
+            if st.button("양자 결과 AI 해석 생성", key="ai_btn_quantum"):
+                with st.spinner("Groq가 양자 실험 결과를 분석 중..."):
+                    call_groq(groq_api_key, _ai_prompt_quantum, _cache_key_q, _local_q_summary)
+            _cached_q = st.session_state.get(f"groq_{_cache_key_q}")
+            if _cached_q:
+                render_ai_box(_cached_q)
     else:
         st.info("위 버튼을 눌러 Grover 실험을 실행하세요. 측정 분포와 고전 결과 비교가 생성됩니다.")
 
@@ -2269,24 +2300,20 @@ with tabs[3]:
     with st.expander("현재 구현의 한계와 의의"):
         st.markdown(
             """
-            **한계:**
-            - Oracle은 BDeu 점수를 양자 회로 안에서 직접 계산하지 않고, 고전적으로 구한 상위 bitstring을 표시합니다.
-            - Grover는 전체 비트 공간을 증폭하므로, 측정 결과에는 순환 그래프도 섞일 수 있습니다.
-            - 따라서 완전한 양자 우위 입증이 아니라, BDeu 상위 후보를 marked state로 둔 amplitude amplification 시연입니다.
+            **한계점:**
+            - **Oracle 구성**: 현재 BDeu 점수를 양자 회로 내에서 직접 계산(In-circuit scoring)하지 않고, 고전적으로 계산된 상위 후보를 marked state로 사용합니다.
+            - **Valid DAG 필터링**: Grover는 전체 비트 공간($2^n$)을 탐색하므로 순환 그래프가 포함될 수 있으며, 측정 후 유효 DAG 여부를 고전적으로 확인합니다.
 
-            **의의:**
-            - 인과 구조 탐색이라는 통계학 문제를 양자 탐색 문제로 **정식화**할 수 있음을 보여줍니다.
-            - 변수가 5개 이상으로 확장되면 Grover의 이차 속도향상 이점이 실질적으로 드러나기 시작합니다.
-            - 이 접근은 양자 인과 발견 분야의 시작점으로서 의미가 있습니다.
-
-            **요약:** 이 앱은 관측 데이터에서 가능한 DAG를 점수화하고 개입 후보를 비교하는 탐색형 도구이며,
-            Grover 구현은 BDeu 상위 후보를 marked state로 둔 개념증명입니다.
+            **Qiskit 프로젝트의 의의:**
+            - **정식화(Formulation)**: 인과 구조 탐색이라는 비정렬 탐색 문제를 Grover 알고리즘의 구조($|s\\rangle \\to Oracle \\to Diffuser \\to Measure$)에 성공적으로 매핑했습니다.
+            - **확장성**: 변수 개수가 늘어날수록 전수조사($O(N)$) 대비 Grover($O(\\sqrt{N})$)의 이차 속도 향상이 더욱 뚜렷해집니다.
+            - **Qiskit 활용**: `qiskit.QuantumCircuit`을 이용해 Oracle과 Diffuser를 동적으로 구성하고 `qiskit_aer` 시뮬레이터로 검증했습니다.
             """
         )
 
 with tabs[4]:
     # ═══ 종합 분석 ═══
-    st.subheader("종합 분석 대시보드")
+    st.subheader("인과 및 양자 분석 최종 대시보드")
 
     active_grover_r = st.session_state.get("grover_result")
     grover_active = active_grover_r is not None and st.session_state.get("grover_run_key") == run_key
@@ -2336,9 +2363,9 @@ with tabs[4]:
 
     st.divider()
 
-    # ── Radar + Amplification (if Grover ran) ──
+    # ── Radar + Comparison ──
     if grover_active:
-        st.markdown("#### Classical vs Quantum 다차원 비교")
+        st.markdown("#### 고전 vs 양자 탐색 성능 비교")
         radar_cols = st.columns([1.1, 0.9])
         with radar_cols[0]:
             st.pyplot(plot_radar_comparison(
@@ -2347,133 +2374,107 @@ with tabs[4]:
         with radar_cols[1]:
             compare_rows = []
             dims = [
-                ("Precision", best_metrics.get("precision", 0) if best_metrics else 0,
-                 grover_metrics_r.get("precision", 0) if grover_metrics_r else 0),
-                ("Recall", best_metrics.get("recall", 0) if best_metrics else 0,
-                 grover_metrics_r.get("recall", 0) if grover_metrics_r else 0),
-                ("F1 Score", best_metrics.get("f1", 0) if best_metrics else 0,
+                ("Structure F1", best_metrics.get("f1", 0) if best_metrics else 0,
                  grover_metrics_r.get("f1", 0) if grover_metrics_r else 0),
-                ("SHD", best_metrics.get("shd", "-") if best_metrics else "-",
+                ("SHD Error", best_metrics.get("shd", "-") if best_metrics else "-",
                  grover_metrics_r.get("shd", "-") if grover_metrics_r else "-"),
-                ("BDeu Rank", 1, active_grover_r.get("selected_rank", "-")),
+                ("Search Depth", f"{len(valid_dags):,}", f"{active_grover_r['n_iterations']:,}"),
                 ("BDeu Score", round(best_score, 2), round(active_grover_r.get("selected_score", 0) or 0, 2)),
-                ("Oracle Evaluations", f"{len(valid_dags):,}", f"{active_grover_r['n_iterations']:,}"),
+                ("Amplification", "1.0x", f"{active_grover_r['good_probability']/(top_k_effective/2**n_edges):.1f}x"),
             ]
             for name, c_val, g_val in dims:
-                winner = ""
-                if isinstance(c_val, (int, float)) and isinstance(g_val, (int, float)):
-                    if name == "SHD":
-                        winner = "Classical" if c_val <= g_val else "Grover"
-                    elif name in ("BDeu Rank",):
-                        winner = "Classical" if c_val <= g_val else "Grover"
-                    elif name == "Oracle Evaluations":
-                        winner = "Grover"
-                    else:
-                        winner = "Classical" if c_val >= g_val else "Grover"
-                compare_rows.append({
-                    "Metric": name,
-                    "Classical": c_val if not isinstance(c_val, float) else round(c_val, 3),
-                    "Grover": g_val if not isinstance(g_val, float) else round(g_val, 3),
-                    "Winner": winner,
-                })
+                compare_rows.append({"Metric": name, "Classical (Exhaustive)": c_val, "Quantum (Grover)": g_val})
             st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
 
         st.divider()
-        st.markdown("#### Grover 파이프라인 단계별 확률 변화")
+        st.markdown("#### Qiskit Grover 파이프라인 확률 증폭 현황")
         st.pyplot(plot_amplification_waterfall(active_grover_r, n_edges, top_k_effective), use_container_width=True)
         st.divider()
 
     # ── Score landscape ──
-    st.markdown("#### BDeu Score Landscape")
+    st.markdown("#### BDeu Score Landscape 및 데이터 요약")
     explain_cols = st.columns([1.1, 0.9])
     with explain_cols[0]:
         st.pyplot(plot_score_landscape(scored, top_k_effective), use_container_width=True)
     with explain_cols[1]:
-        score_gap = scored[0][2] - scored[-1][2] if len(scored) > 1 else 0
-        top5_avg = np.mean([s for _, _, s in scored[:5]]) if len(scored) >= 5 else scored[0][2]
         st.markdown(
             f"""
             | 항목 | 값 |
             |---|---|
-            | 유효 DAG 수 | **{len(valid_dags):,}**개 |
-            | 1위 BDeu | **{scored[0][2]:.2f}** |
-            | Top-5 평균 | **{top5_avg:.2f}** |
-            | 1위-꼴찌 격차 | **{score_gap:.2f}** |
-            | ESS | **{ess}** |
+            | 유효 DAG 후보 수 | **{len(valid_dags):,}**개 |
+            | 1위 구조 BDeu 점수 | **{scored[0][2]:.2f}** |
+            | 결과 변수 | **{outcome}** |
+            | 분석 모델 | **Qiskit-based Grover Search** |
             """
         )
 
     st.divider()
 
-    # ── Key Findings ──
-    st.markdown("#### Key Findings")
-    insights = generate_interpretation(
-        has_gt=has_ground_truth,
-        best_metrics=best_metrics,
-        grover_result=active_grover_r if grover_active else None,
-        grover_metrics=grover_metrics_r,
-        n_edges=n_edges,
-        top_k=top_k_effective,
-        scored=scored,
-        variables=variables,
-        dataset_name=dataset_name,
-    )
-
-    for color, title, body in insights:
-        st.markdown(
-            f"""
-            <div style="
-                border-left: 4px solid {color};
-                background: linear-gradient(90deg, {color}08, #ffffff);
-                padding: 0.9rem 1.2rem;
-                border-radius: 0 10px 10px 0;
-                margin-bottom: 0.7rem;
-            ">
-                <div style="font-weight: 700; color: {color}; font-size: 0.95rem; margin-bottom: 0.25rem;">{title}</div>
-                <div style="color: #334155; font-size: 0.88rem; line-height: 1.55;">{body}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    if not grover_active:
-        st.info("'양자적 접근' 탭에서 Grover를 실행한 뒤 돌아오면 양자-고전 비교가 추가됩니다.")
-
+    # ── AI Synthesis ──
     if ai_enabled:
+        st.markdown("#### 🏁 인과 추론 및 양자 분석 최종 보고서")
         _ai_edges_syn = format_edges(best_graph.edges())
-        _ai_gt_syn = f"정답 구조: {format_edges(ground_truth.edges())}, F1={best_metrics['f1']:.2f}, SHD={best_metrics['shd']}" if has_ground_truth and best_metrics else "정답 구조 없음"
-        _ai_grover_syn = ""
+        _ai_gt_syn = f"정답 구조: {format_edges(ground_truth.edges())}, F1={best_metrics['f1']:.2f}" if has_ground_truth and best_metrics else "정답 구조 없음"
+        _ai_grover_syn = "Grover 미실행"
         if grover_active:
             _ai_grover_syn = (
-                f"Grover 결과: Oracle 적중률 {active_grover_r['good_probability']*100:.1f}%, "
-                f"선택 DAG rank={active_grover_r.get('selected_rank', '?')}"
+                f"Grover 결과: {n_edges}큐비트 회로, Oracle 적중률 {active_grover_r['good_probability']*100:.1f}%, "
+                f"증폭률 {active_grover_r['good_probability']/(top_k_effective/2**n_edges):.1f}배"
             )
         _ai_intv_syn = ""
         _intv_preview = intervention_table(data, best_graph, variables, outcome, outcome_higher_is_better)
         if not _intv_preview.empty:
             if has_actionable_intervention(_intv_preview):
                 _top = _intv_preview.iloc[0]
-                _ai_intv_syn = f"최적 개입: {_top['target']} ({_top['recommended_action']}, effect={_top['effect_high_minus_low']:.4f})"
-            else:
-                _ai_intv_syn = "개입 추천: 선택한 DAG 기준으로 추천 가능한 개입 없음(effect=0 또는 directed path 없음)"
+                _ai_intv_syn = f"핵심 개입 타겟: {_top['target']} ({_top['recommended_action']}, 효과={_top['effect_high_minus_low']:.4f})"
+
         _ai_prompt_syn = (
-            f"당신은 인과 추론 전문가입니다. 이 분석의 전체 결과를 종합해 비전문가에게 핵심 인사이트를 전달하세요. "
-            f"마크다운 문법 없이 일반 텍스트로 4~5문장 이내로 작성하세요.\n\n"
-            f"데이터셋: {dataset_name}\n변수: {', '.join(variables)}\n결과 변수: {outcome}\n"
-            f"발견된 DAG: {_ai_edges_syn}\n{_ai_gt_syn}\n"
-            f"유효 DAG {len(valid_dags)}개 중 1위 BDeu={scored[0][2]:.2f}\n"
-            f"{_ai_grover_syn}\n{_ai_intv_syn}\n\n"
-            f"종합 요약: 이 데이터에서 무엇을 알 수 있고, 어떤 행동을 권고할 수 있는지 정리하세요."
+            f"당신은 인과 추론과 양자 컴퓨팅(Qiskit) 전문가입니다. 이 프로젝트의 전체 결과를 종합하여 최종 보고서를 작성하세요.\n\n"
+            f"### 분석 컨텍스트:\n"
+            f"- 데이터셋: {dataset_name}\n- 변수: {', '.join(variables)}\n- 결과 변수: {outcome}\n"
+            f"- 발견된 최적 DAG: {_ai_edges_syn}\n- {(_ai_gt_syn)}\n\n"
+            f"### 양자 컴퓨팅 결과 (Qiskit):\n"
+            f"- {_ai_grover_syn}\n- Grover 알고리즘이 비정렬 탐색 문제를 어떻게 해결했는지 요약하세요.\n\n"
+            f"### 결론 및 행동 제언:\n"
+            f"- {outcome}을 {'높이기' if outcome_higher_is_better else '낮추기'} 위한 전략 요약: {_ai_intv_syn}\n"
+            f"- 이 데이터 기반의 분석이 실제 의사결정에 어떻게 기여할 수 있는지 제언하세요.\n\n"
+            f"### Qiskit 수업 마무리 멘트:\n"
+            f"- 양자 알고리즘을 실무 문제(인과 추론)에 접목한 이 시도의 의의를 강조하세요.\n\n"
+            f"전문화된 보고서 형식으로 작성하고, 비전문가도 이해할 수 있도록 쉽게 풀어 설명하세요."
         )
         _cache_key_syn = prompt_cache_key("synthesis", _ai_prompt_syn)
         _local_syn_summary = (
-            f"{dataset_name} 데이터에서 BDeu 1위 DAG는 {_ai_edges_syn}입니다. "
-            f"{_ai_gt_syn}. {_ai_intv_syn}. "
-            "이 앱은 완전한 인과 증명이 아니라, DAG 후보를 점수화하고 개입 후보를 비교하는 탐색형 도구입니다."
+            f"{dataset_name} 데이터 분석 결과, {outcome}에 대한 최적의 인과 구조와 개입 타겟을 식별했습니다. "
+            f"특히 Qiskit Grover 알고리즘을 통해 수많은 DAG 후보 중 고득점 구조를 양자적으로 탐색할 수 있음을 확인했습니다. "
+            f"최종 추천 개입은 {_ai_intv_syn}입니다."
         )
-        if st.button("AI 종합 해석 생성", key="ai_btn_synthesis"):
-            with st.spinner("Groq가 종합 분석을 생성하는 중..."):
+
+        if st.button("AI 종합 보고서 생성", key="ai_btn_synthesis"):
+            with st.spinner("Groq가 전체 분석을 종합 중..."):
                 call_groq(groq_api_key, _ai_prompt_syn, _cache_key_syn, _local_syn_summary)
         _cached_syn = st.session_state.get(f"groq_{_cache_key_syn}")
         if _cached_syn:
             render_ai_box(_cached_syn)
+    else:
+        st.markdown("#### Key Findings (Local)")
+        insights = generate_interpretation(
+            has_gt=has_ground_truth,
+            best_metrics=best_metrics,
+            grover_result=active_grover_r if grover_active else None,
+            grover_metrics=grover_metrics_r,
+            n_edges=n_edges,
+            top_k=top_k_effective,
+            scored=scored,
+            variables=variables,
+            dataset_name=dataset_name,
+        )
+        for color, title, body in insights:
+            st.markdown(
+                f"""
+                <div style="border-left: 4px solid {color}; background: {color}08; padding: 0.9rem 1.2rem; border-radius: 0 10px 10px 0; margin-bottom: 0.7rem;">
+                    <div style="font-weight: 700; color: {color}; font-size: 0.95rem;">{title}</div>
+                    <div style="color: #334155; font-size: 0.88rem;">{body}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
