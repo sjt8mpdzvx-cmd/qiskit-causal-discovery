@@ -1,0 +1,15 @@
+{
+  "name": "Sprinkler Network",
+  "description": "날씨(구름) → 스프링클러/비 → 잔디 젖음. 인과추론 교육용 기본 벤치마크.",
+  "domain": "일상 / 교육",
+  "n_variables": 4,
+  "n_samples": 1000,
+  "variables": ["Cloudy", "Sprinkler", "Rain", "Wet_Grass"],
+  "ground_truth_edges": [
+    ["Cloudy", "Sprinkler"],
+    ["Cloudy", "Rain"],
+    ["Sprinkler", "Wet_Grass"],
+    ["Rain", "Wet_Grass"]
+  ],
+  "csv_file": "sprinkler.csv"
+}

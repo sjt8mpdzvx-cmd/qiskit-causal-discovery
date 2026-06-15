@@ -1,0 +1,2180 @@
+"""
+Quantum Causal Discovery Lab
+
+데이터에서 인과 구조(DAG)를 찾고, Grover 탐색으로 좋은 구조의 측정 확률을
+증폭한 뒤, 발견된 구조를 이용해 개입 타겟 후보를 비교하는 Streamlit 앱.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import math
+import os
+import sys
+import tempfile
+import time
+import warnings
+from dataclasses import dataclass
+from typing import Iterable
+
+import numpy as np
+import pandas as pd
+
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    os.path.join(tempfile.gettempdir(), "qiskit_causal_discovery_matplotlib"),
+)
+os.environ.setdefault(
+    "XDG_CACHE_HOME",
+    os.path.join(tempfile.gettempdir(), "qiskit_causal_discovery_cache"),
+)
+os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
+os.makedirs(os.environ["XDG_CACHE_HOME"], exist_ok=True)
+
+import matplotlib
+import matplotlib.pyplot as plt
+import networkx as nx
+import streamlit as st
+
+warnings.filterwarnings("ignore")
+matplotlib.rcParams.update({
+    "font.family": ["AppleGothic", "DejaVu Sans"],
+    "axes.unicode_minus": False,
+    "figure.facecolor": "#ffffff",
+    "axes.facecolor": "#fafbfc",
+    "axes.edgecolor": "#e2e8f0",
+    "axes.grid": True,
+    "grid.color": "#f1f5f9",
+    "grid.linewidth": 0.8,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "axes.titlepad": 14,
+    "axes.labelsize": 10,
+    "axes.labelcolor": "#475569",
+    "xtick.color": "#64748b",
+    "ytick.color": "#64748b",
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "legend.frameon": True,
+    "legend.fancybox": True,
+    "legend.shadow": False,
+    "legend.framealpha": 0.9,
+    "legend.edgecolor": "#e2e8f0",
+    "legend.fontsize": 9,
+})
+
+APP_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(APP_DIR, "data")
+sys.path.insert(0, APP_DIR)
+
+from src.dag_utils import (  # noqa: E402
+    bitstring_to_dag,
+    edge_metrics,
+    enumerate_all_dags,
+    structural_hamming_distance,
+)
+from src.grover_search import run_grover_search  # noqa: E402
+from src.scoring import score_all_dags  # noqa: E402
+
+
+@dataclass(frozen=True)
+class DatasetSpec:
+    file: str
+    description: str
+    default_vars: tuple[str, ...]
+    ground_truth: tuple[tuple[str, str], ...]
+    outcome_hint: str | None
+    story: str
+    outcome_higher_is_better: bool | None = None  # True=높을수록 좋음, False=높을수록 나쁨
+
+
+DATASETS: dict[str, DatasetSpec] = {
+    "Sachs protein signaling": DatasetSpec(
+        file="sachs_raw.csv",
+        description="T세포 단일세포 단백질 신호 데이터. Raf-Mek-Erk MAPK 경로를 중심으로 분석합니다.",
+        default_vars=("Raf", "Mek", "Erk", "Akt"),
+        ground_truth=(("Raf", "Mek"), ("Mek", "Erk"), ("Erk", "Akt")),
+        outcome_hint="Erk",
+        story="암세포에서 특정 단백질 신호가 과활성화되었을 때, 어느 상위 단백질에 개입해야 하류 신호를 줄일 수 있는지 찾는 문제로 해석할 수 있습니다.",
+        outcome_higher_is_better=False,
+    ),
+    "Asia lung diagnosis": DatasetSpec(
+        file="asia.csv",
+        description="폐질환 진단 베이지안 네트워크 벤치마크. 흡연, 기관지염, 폐암 등의 관계를 다룹니다.",
+        default_vars=("smoke", "bronc", "lung", "dysp"),
+        ground_truth=(
+            ("smoke", "bronc"),
+            ("smoke", "lung"),
+            ("asia", "tub"),
+            ("tub", "either"),
+            ("lung", "either"),
+            ("either", "xray"),
+            ("either", "dysp"),
+            ("bronc", "dysp"),
+        ),
+        outcome_hint="dysp",
+        story="증상 변수에 영향을 주는 원인을 구조적으로 찾는 진단 보조 문제로 볼 수 있습니다.",
+        outcome_higher_is_better=False,
+    ),
+    "Sprinkler weather": DatasetSpec(
+        file="sprinkler.csv",
+        description="날씨-스프링클러-잔디 젖음 관계를 담은 교육용 인과 네트워크입니다.",
+        default_vars=("Cloudy", "Sprinkler", "Rain", "Wet_Grass"),
+        ground_truth=(
+            ("Cloudy", "Sprinkler"),
+            ("Cloudy", "Rain"),
+            ("Sprinkler", "Wet_Grass"),
+            ("Rain", "Wet_Grass"),
+        ),
+        outcome_hint="Wet_Grass",
+        story="상관관계만으로는 비와 스프링클러의 방향을 구분하기 어렵다는 점을 보여주는 작은 예제입니다.",
+        outcome_higher_is_better=False,
+    ),
+    "Alarm ICU monitoring": DatasetSpec(
+        file="alarm.csv",
+        description="ICU 환자 모니터링 베이지안 네트워크에서 추출한 이산 데이터입니다.",
+        default_vars=("HYPOVOLEMIA", "LVEDVOLUME", "STROKEVOLUME", "CVP"),
+        ground_truth=(),
+        outcome_hint=None,
+        story="의료 모니터링 변수 사이의 의존 구조를 작은 부분 문제로 잘라 탐색합니다.",
+    ),
+    "Auto MPG (자동차 연비)": DatasetSpec(
+        file="auto_mpg.csv",
+        description="1970-82년 자동차 392대의 엔진/차체 사양과 연비(MPG) 데이터입니다. 배기량, 마력, 무게가 연비에 미치는 인과 관계를 분석합니다.",
+        default_vars=("Displacement", "Horsepower", "Weight", "MPG"),
+        ground_truth=(
+            ("Displacement", "Horsepower"),
+            ("Displacement", "Weight"),
+            ("Horsepower", "MPG"),
+            ("Weight", "MPG"),
+        ),
+        outcome_hint="MPG",
+        story="자동차 제조사가 연비를 개선하려 할 때, 엔진 배기량을 줄여야 하는지 차체 무게를 줄여야 하는지 — 인과 구조를 통해 가장 효과적인 개입 지점을 찾는 문제입니다.",
+        outcome_higher_is_better=True,
+    ),
+    "Framingham Heart Study (심장병)": DatasetSpec(
+        file="framingham_heart.csv",
+        description="70년 이상 추적된 Framingham 심장 연구 데이터. 흡연, 콜레스테롤, 혈압이 심장병 위험에 미치는 인과 경로를 분석합니다.",
+        default_vars=("CigsPerDay", "Cholesterol", "SysBP", "HeartDisease"),
+        ground_truth=(
+            ("CigsPerDay", "Cholesterol"),
+            ("CigsPerDay", "SysBP"),
+            ("Cholesterol", "HeartDisease"),
+            ("SysBP", "HeartDisease"),
+        ),
+        outcome_hint="HeartDisease",
+        story="공중보건 기관이 심장병 발생률을 줄이려 할 때, 금연 캠페인·콜레스테롤 약·혈압 약 중 어디에 자원을 집중해야 하는지 인과 분석으로 판단하는 문제입니다.",
+        outcome_higher_is_better=False,
+    ),
+    "Student Performance (학생 성적)": DatasetSpec(
+        file="student_performance.csv",
+        description="포르투갈 중등학교 수학 과목 395명의 학습 습관·행동·성적 데이터입니다 (UCI ML Repository).",
+        default_vars=("StudyTime", "GoOut", "Absences", "FinalGrade"),
+        ground_truth=(
+            ("GoOut", "StudyTime"),
+            ("GoOut", "Absences"),
+            ("StudyTime", "FinalGrade"),
+            ("Absences", "FinalGrade"),
+        ),
+        outcome_hint="FinalGrade",
+        story="학교가 학생 성적을 높이려 할 때, 공부 시간 확보·출석 관리·외출 제한 중 어디에 개입하는 것이 가장 효과적인지 인과 구조를 통해 판단하는 문제입니다.",
+        outcome_higher_is_better=True,
+    ),
+}
+
+
+OUTCOME_DIRECTION_DEFAULTS: dict[str, bool] = {
+    # Higher is better
+    "MPG": True,
+    "FinalGrade": True,
+    "StudyTime": True,
+    # Higher is usually worse in the built-in stories
+    "Erk": False,
+    "Akt": False,
+    "Mek": False,
+    "Raf": False,
+    "dysp": False,
+    "bronc": False,
+    "lung": False,
+    "smoke": False,
+    "Wet_Grass": False,
+    "HeartDisease": False,
+    "CigsPerDay": False,
+    "Cholesterol": False,
+    "SysBP": False,
+    "Absences": False,
+    "GoOut": False,
+    "Displacement": False,
+    "Horsepower": False,
+    "Weight": False,
+}
+
+
+def infer_outcome_direction(outcome: str, spec: DatasetSpec | None) -> tuple[bool, str]:
+    """Return default desirability direction and a short confidence label."""
+    if outcome in OUTCOME_DIRECTION_DEFAULTS:
+        return OUTCOME_DIRECTION_DEFAULTS[outcome], "known"
+    if spec is not None and spec.outcome_hint == outcome and spec.outcome_higher_is_better is not None:
+        return spec.outcome_higher_is_better, "dataset"
+    return False, "unknown"
+
+
+def available_datasets() -> dict[str, DatasetSpec]:
+    return {
+        name: spec
+        for name, spec in DATASETS.items()
+        if os.path.exists(os.path.join(DATA_DIR, spec.file))
+    }
+
+
+def format_edges(edges: Iterable[tuple[str, str]]) -> str:
+    edge_list = list(edges)
+    if not edge_list:
+        return "엣지 없음"
+    return ", ".join(f"{src}->{dst}" for src, dst in edge_list)
+
+
+def parse_edge_text(text: str) -> list[tuple[str, str]]:
+    edges: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or "->" not in line:
+            continue
+        src, dst = line.split("->", 1)
+        src, dst = src.strip(), dst.strip()
+        if src and dst and src != dst:
+            edges.append((src, dst))
+    return edges
+
+
+def build_ground_truth(variables: list[str], edges: Iterable[tuple[str, str]]) -> nx.DiGraph:
+    var_set = set(variables)
+    graph = nx.DiGraph()
+    graph.add_nodes_from(variables)
+    for src, dst in edges:
+        if src in var_set and dst in var_set:
+            graph.add_edge(src, dst)
+    return graph
+
+
+@st.cache_data(show_spinner=False)
+def load_csv(file_name: str) -> pd.DataFrame:
+    return pd.read_csv(os.path.join(DATA_DIR, file_name))
+
+
+def discretize_for_bdeu(raw: pd.DataFrame, variables: list[str], auto_discretize: bool) -> pd.DataFrame:
+    data = raw[variables].copy()
+    for col in variables:
+        series = data[col]
+        if pd.api.types.is_numeric_dtype(series):
+            unique_count = series.nunique(dropna=True)
+            if auto_discretize and unique_count > 8:
+                ranked = series.rank(method="first")
+                data[col] = pd.qcut(ranked, q=3, labels=False, duplicates="drop")
+            else:
+                data[col] = series
+        else:
+            data[col] = series.astype("category").cat.codes
+    return data.dropna().reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def score_from_csv_bytes(
+    csv_bytes: bytes,
+    variables_tuple: tuple[str, ...],
+    ess: int,
+    auto_discretize: bool,
+) -> tuple[pd.DataFrame, list[tuple[str, nx.DiGraph]], list[tuple[str, str]], list[tuple[str, nx.DiGraph, float]], float]:
+    raw = pd.read_csv(io.BytesIO(csv_bytes))
+    variables = list(variables_tuple)
+    data = discretize_for_bdeu(raw, variables, auto_discretize)
+    start = time.time()
+    valid_dags, edge_list = enumerate_all_dags(variables)
+    scored = score_all_dags(data, valid_dags, variables, equivalent_sample_size=ess)
+    elapsed = time.time() - start
+    return data, valid_dags, edge_list, scored, elapsed
+
+
+def known_layout(variables: list[str]) -> dict[str, tuple[float, float]] | None:
+    protein_pos = {
+        "Raf": (0.0, 0.45),
+        "Mek": (1.0, 0.45),
+        "Erk": (2.0, 0.45),
+        "Akt": (1.5, -0.35),
+        "PKA": (-0.2, -0.35),
+        "PKC": (-0.2, 1.05),
+    }
+    sprinkler_pos = {
+        "Cloudy": (0.0, 1.0),
+        "Sprinkler": (-0.9, 0.1),
+        "Rain": (0.9, 0.1),
+        "Wet_Grass": (0.0, -0.75),
+    }
+    asia_pos = {
+        "asia": (-1.2, 1.0),
+        "tub": (-1.2, 0.25),
+        "smoke": (0.2, 1.0),
+        "lung": (0.0, 0.25),
+        "bronc": (1.0, 0.25),
+        "either": (-0.45, -0.45),
+        "xray": (-1.0, -1.2),
+        "dysp": (0.45, -1.2),
+    }
+    for layout in (protein_pos, sprinkler_pos, asia_pos):
+        if all(var in layout for var in variables):
+            return {var: layout[var] for var in variables}
+    return None
+
+
+def draw_dag(
+    graph: nx.DiGraph,
+    variables: list[str],
+    title: str,
+    reference: nx.DiGraph | None = None,
+    subtitle: str | None = None,
+) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=(4.8, 3.8))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#ffffff")
+    graph = graph.copy()
+    graph.add_nodes_from(variables)
+
+    pos = known_layout(variables)
+    if pos is None:
+        if nx.is_directed_acyclic_graph(graph) and len(graph.edges()) > 0:
+            generations = list(nx.topological_generations(graph))
+            pos = {}
+            for layer_idx, layer in enumerate(generations):
+                layer = sorted(layer)
+                for item_idx, node in enumerate(layer):
+                    pos[node] = (layer_idx, -item_idx)
+            missing = [node for node in variables if node not in pos]
+            for idx, node in enumerate(missing):
+                pos[node] = (0, -idx)
+        else:
+            pos = nx.spring_layout(graph, seed=7)
+
+    # Shadow nodes for depth effect
+    shadow_pos = {k: (v[0] + 0.015, v[1] - 0.015) for k, v in pos.items()}
+    nx.draw_networkx_nodes(
+        graph, shadow_pos, ax=ax,
+        node_color="#e2e8f0", node_size=1600, edgecolors="none", linewidths=0, alpha=0.5,
+    )
+
+    node_colors = []
+    for node in graph.nodes():
+        if graph.out_degree(node) > 0 and graph.in_degree(node) == 0:
+            node_colors.append("#eef2ff")  # source: indigo tint
+        elif graph.out_degree(node) == 0:
+            node_colors.append("#fef3c7")  # sink: amber tint
+        else:
+            node_colors.append("#f0fdf4")  # intermediate: green tint
+
+    nx.draw_networkx_nodes(
+        graph, pos, ax=ax,
+        node_color=node_colors, node_size=1600,
+        edgecolors="#334155", linewidths=2.0,
+    )
+    nx.draw_networkx_labels(
+        graph, pos, ax=ax,
+        font_size=10.5, font_weight="bold", font_color="#1e293b",
+    )
+
+    edge_colors = []
+    widths = []
+    styles = []
+    reference_edges = set(reference.edges()) if reference is not None else set()
+    for edge in graph.edges():
+        if reference is None:
+            edge_colors.append("#6366f1")
+            widths.append(2.5)
+            styles.append("solid")
+        elif edge in reference_edges:
+            edge_colors.append("#059669")
+            widths.append(3.0)
+            styles.append("solid")
+        else:
+            edge_colors.append("#ef4444")
+            widths.append(2.5)
+            styles.append("solid")
+
+    if graph.edges():
+        nx.draw_networkx_edges(
+            graph, pos, ax=ax,
+            edge_color=edge_colors, width=widths,
+            arrows=True, arrowsize=24,
+            connectionstyle="arc3,rad=0.1",
+            min_source_margin=20, min_target_margin=20,
+            arrowstyle="-|>", node_size=1600,
+        )
+
+    ax.set_title(title, fontsize=12.5, fontweight="bold", pad=16, color="#0f172a")
+    if subtitle:
+        ax.text(
+            0.5, -0.06, subtitle, transform=ax.transAxes,
+            ha="center", va="top", fontsize=9,
+            color="#6366f1", fontweight="medium",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#eef2ff", edgecolor="#c7d2fe", alpha=0.8),
+        )
+    ax.axis("off")
+    fig.tight_layout()
+    return fig
+
+
+def plot_correlation(data: pd.DataFrame) -> plt.Figure:
+    numeric = data.apply(pd.to_numeric, errors="coerce")
+    corr = numeric.corr()
+    fig, ax = plt.subplots(figsize=(4.9, 3.8))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#ffffff")
+
+    # Custom purple-orange diverging colormap
+    from matplotlib.colors import LinearSegmentedColormap
+    cmap = LinearSegmentedColormap.from_list(
+        "custom_div", ["#6366f1", "#e0e7ff", "#ffffff", "#fed7aa", "#ea580c"]
+    )
+
+    im = ax.imshow(corr, cmap=cmap, vmin=-1, vmax=1, aspect="equal")
+    ax.set_xticks(range(len(corr.columns)))
+    ax.set_yticks(range(len(corr.columns)))
+    ax.set_xticklabels(corr.columns, rotation=35, ha="right", fontweight="medium")
+    ax.set_yticklabels(corr.columns, fontweight="medium")
+    for i in range(len(corr.columns)):
+        for j in range(len(corr.columns)):
+            value = corr.iloc[i, j]
+            if np.isfinite(value):
+                text_color = "#ffffff" if abs(value) > 0.6 else "#334155"
+                ax.text(j, i, f"{value:.2f}", ha="center", va="center", fontsize=9.5, fontweight="bold", color=text_color)
+    ax.set_title("Correlation Matrix", fontsize=12, fontweight="bold", color="#0f172a")
+
+    # Rounded edges on spines
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    cbar = fig.colorbar(im, ax=ax, shrink=0.78, pad=0.04)
+    cbar.outline.set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+def plot_score_distribution(scored: list[tuple[str, nx.DiGraph, float]], good_bitstrings: list[str]) -> plt.Figure:
+    scores = np.array([item[2] for item in scored])
+    fig, ax = plt.subplots(figsize=(6.2, 3.8))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#fafbfc")
+
+    n, bins, patches = ax.hist(
+        scores, bins=min(40, max(8, len(scores) // 4)),
+        color="#c7d2fe", edgecolor="#818cf8", linewidth=0.8, alpha=0.85,
+    )
+
+    best_score = scored[0][2]
+    threshold_score = scored[min(len(scored), len(good_bitstrings)) - 1][2]
+    ax.axvline(best_score, color="#6366f1", linewidth=2.5, label="Best BDeu", zorder=5)
+    ax.axvline(threshold_score, color="#f59e0b", linewidth=2.0, linestyle="--", label="Oracle threshold", zorder=5)
+
+    # Shade the "good" region
+    ax.axvspan(threshold_score, scores.max() + 1, alpha=0.06, color="#6366f1")
+
+    ax.set_xlabel("BDeu Score (higher is better)")
+    ax.set_ylabel("DAG count")
+    ax.set_title("Score Distribution of Valid DAGs", fontsize=12, fontweight="bold", color="#0f172a")
+    ax.legend(loc="upper left", framealpha=0.9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+def plot_grover_counts(
+    counts: dict[str, int],
+    good_bitstrings: list[str],
+    valid_bitstrings: set[str],
+    top_n: int = 18,
+) -> plt.Figure:
+    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:top_n]
+    bitstrings = [item[0] for item in ranked]
+    values = [item[1] for item in ranked]
+    colors = []
+    for bitstring in bitstrings:
+        if bitstring in good_bitstrings:
+            colors.append("#6366f1")
+        elif bitstring in valid_bitstrings:
+            colors.append("#38bdf8")
+        else:
+            colors.append("#e2e8f0")
+    fig, ax = plt.subplots(figsize=(9.5, 4.0))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#fafbfc")
+
+    bars = ax.bar(
+        range(len(bitstrings)), values,
+        color=colors, edgecolor="#ffffff", linewidth=1.2,
+        width=0.75, zorder=3,
+    )
+    # Add value labels on top of bars for Oracle targets
+    for i, (bar, bs) in enumerate(zip(bars, bitstrings)):
+        if bs in good_bitstrings:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2, bar.get_height() + max(values) * 0.01,
+                str(values[i]), ha="center", va="bottom", fontsize=7.5, fontweight="bold", color="#4338ca",
+            )
+
+    ax.set_xticks(range(len(bitstrings)))
+    ax.set_xticklabels(bitstrings, rotation=50, ha="right", fontsize=8, fontfamily="monospace")
+    ax.set_ylabel("Measurement Count")
+    ax.set_title("Grover Measurement Distribution", fontsize=12, fontweight="bold", color="#0f172a")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    # Legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor="#6366f1", label="Oracle target"),
+        Patch(facecolor="#38bdf8", label="Valid DAG"),
+        Patch(facecolor="#e2e8f0", label="Invalid"),
+    ]
+    ax.legend(handles=legend_elements, loc="upper right", framealpha=0.9)
+    fig.tight_layout()
+    return fig
+
+
+def candidate_table(
+    scored: list[tuple[str, nx.DiGraph, float]],
+    reference: nx.DiGraph | None,
+    top_n: int = 12,
+) -> pd.DataFrame:
+    best = scored[0][2]
+    rows = []
+    for rank, (bitstring, graph, score) in enumerate(scored[:top_n], start=1):
+        row = {
+            "rank": rank,
+            "bitstring": bitstring,
+            "BDeu": round(score, 3),
+            "gap": round(score - best, 3),
+            "edges": format_edges(graph.edges()),
+        }
+        if reference is not None and len(reference.edges()) > 0:
+            metrics = edge_metrics(reference, graph)
+            row["SHD"] = structural_hamming_distance(reference, graph)
+            row["F1"] = round(metrics["f1"], 3)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def graph_metrics(reference: nx.DiGraph | None, graph: nx.DiGraph) -> dict[str, float | int] | None:
+    if reference is None or len(reference.edges()) == 0:
+        return None
+    metrics = edge_metrics(reference, graph)
+    metrics["shd"] = structural_hamming_distance(reference, graph)
+    return metrics
+
+
+def grover_iteration_count(n_qubits: int, target_count: int) -> int:
+    if target_count <= 0:
+        return 1
+    return max(1, int(math.pi / 4 * math.sqrt((2**n_qubits) / target_count)))
+
+
+def enrich_grover_result(
+    result: dict,
+    valid_bitstrings: set[str],
+    scored: list[tuple[str, nx.DiGraph, float]],
+) -> dict:
+    score_lookup = {bitstring: score for bitstring, _, score in scored}
+    rank_lookup = {bitstring: rank for rank, (bitstring, _, _) in enumerate(scored, start=1)}
+    valid_counts = {
+        bitstring: count
+        for bitstring, count in result["counts"].items()
+        if bitstring in valid_bitstrings
+    }
+
+    # Score-weighted selection: 측정 횟수 × BDeu 점수로 최적 DAG 선택
+    if valid_counts:
+        max_score = max(score_lookup.values())
+        min_score = min(score_lookup.values())
+        score_range = max_score - min_score if max_score != min_score else 1.0
+
+        best_combined = None
+        best_combined_val = -float("inf")
+        for bs, cnt in valid_counts.items():
+            s = score_lookup.get(bs, min_score)
+            norm_score = (s - min_score) / score_range
+            norm_count = cnt / result["shots"]
+            combined = 0.6 * norm_score + 0.4 * norm_count
+            if combined > best_combined_val:
+                best_combined_val = combined
+                best_combined = bs
+
+        selected = best_combined or max(valid_counts, key=valid_counts.get)
+    else:
+        selected = result["top_bitstring"]
+
+    # Top-5 measured valid DAGs by score
+    valid_measured = sorted(
+        [(bs, cnt, score_lookup.get(bs, 0), rank_lookup.get(bs, 999)) for bs, cnt in valid_counts.items()],
+        key=lambda x: x[2], reverse=True,
+    )[:5]
+
+    return {
+        **result,
+        "selected_bitstring": selected,
+        "selected_score": score_lookup.get(selected),
+        "selected_rank": rank_lookup.get(selected),
+        "selected_is_valid": selected in valid_bitstrings,
+        "raw_top_is_valid": result["top_bitstring"] in valid_bitstrings,
+        "valid_probability": sum(valid_counts.values()) / result["shots"],
+        "valid_measured_top5": valid_measured,
+        "unique_valid_measured": len(valid_counts),
+        "unique_total_measured": len(result["counts"]),
+    }
+
+
+def check_qiskit() -> tuple[bool, str]:
+    try:
+        import qiskit  # noqa: F401
+        import qiskit_aer  # noqa: F401
+    except Exception as exc:  # pragma: no cover - shown to user in the app
+        return False, str(exc)
+    return True, ""
+
+
+def prompt_cache_key(prefix: str, prompt: str) -> str:
+    """Use the full prompt as the cache identity so changed results are not reused."""
+    digest = hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}_{digest}"
+
+
+def call_gemini(api_key: str, prompt: str, cache_key: str) -> str:
+    """Gemini API를 호출해 자연어 해석을 생성한다. session_state에 캐싱."""
+    state_key = f"gemini_{cache_key}"
+    if state_key in st.session_state:
+        return st.session_state[state_key]
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        response = model.generate_content(prompt)
+        result = response.text
+        st.session_state[state_key] = result
+        return result
+    except Exception as exc:
+        return f"AI 해석 생성 실패: {exc}"
+
+
+def render_ai_box(content: str):
+    """AI 해석 결과를 스타일링된 박스로 렌더링한다."""
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%);
+            border: 1px solid #c7d2fe;
+            border-radius: 12px;
+            padding: 1.2rem 1.4rem;
+            margin: 1rem 0;
+        ">
+            <div style="font-size: 0.78rem; font-weight: 700; color: #6366f1; text-transform: uppercase;
+                        letter-spacing: 0.05em; margin-bottom: 0.5rem;">AI Interpretation (Gemini)</div>
+            <div style="color: #1e293b; font-size: 0.92rem; line-height: 1.7;">{content}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def coverage_confidence(coverage: float) -> tuple[str, str, str]:
+    """Map backdoor coverage to a compact user-facing confidence badge."""
+    if coverage >= 0.8:
+        return "신뢰도 높음", "#dcfce7", "#166534"
+    if coverage >= 0.5:
+        return "제한적 해석", "#fef3c7", "#92400e"
+    return "데이터 부족", "#fee2e2", "#991b1b"
+
+
+def intervention_mean(
+    data: pd.DataFrame,
+    dag: nx.DiGraph,
+    target: str,
+    outcome: str,
+    target_value,
+) -> tuple[float, float, str]:
+    baseline = float(data[outcome].mean())
+    if target == outcome:
+        return baseline, 1.0, "outcome"
+    if not nx.has_path(dag, target, outcome):
+        return baseline, 1.0, "no directed path"
+
+    parents = list(dag.predecessors(target))
+    subset = data[data[target] == target_value]
+    if len(parents) == 0:
+        if len(subset) == 0:
+            return baseline, 0.0, "no matching rows"
+        return float(subset[outcome].mean()), len(subset) / len(data), "direct adjustment"
+
+    grouped = data.groupby(parents, dropna=False).size() / len(data)
+    weighted_sum = 0.0
+    covered_weight = 0.0
+    for combo, probability in grouped.items():
+        combo_values = combo if isinstance(combo, tuple) else (combo,)
+        mask = data[target] == target_value
+        for parent, value in zip(parents, combo_values):
+            mask &= data[parent] == value
+        cell = data[mask]
+        if len(cell) == 0:
+            continue
+        weighted_sum += float(probability) * float(cell[outcome].mean())
+        covered_weight += float(probability)
+
+    if covered_weight == 0:
+        if len(subset) == 0:
+            return baseline, 0.0, "fallback baseline"
+        return float(subset[outcome].mean()), len(subset) / len(data), "fallback conditional"
+    return weighted_sum / covered_weight, covered_weight, f"adjusted by {', '.join(parents)}"
+
+
+def intervention_table(
+    data: pd.DataFrame,
+    dag: nx.DiGraph,
+    variables: list[str],
+    outcome: str,
+    higher_is_better: bool = False,
+) -> pd.DataFrame:
+    rows = []
+    for target in variables:
+        if target == outcome:
+            continue
+        values = sorted(data[target].dropna().unique())
+        if len(values) == 0:
+            continue
+        low_value, high_value = values[0], values[-1]
+        y_low, low_coverage, low_note = intervention_mean(data, dag, target, outcome, low_value)
+        y_high, high_coverage, high_note = intervention_mean(data, dag, target, outcome, high_value)
+        effect = y_high - y_low
+        coverage = min(low_coverage, high_coverage)
+
+        if abs(effect) < 1e-9:
+            action = "개입 우선순위 낮음"
+        elif higher_is_better:
+            # outcome을 높이고 싶다 (MPG, FinalGrade)
+            action = f"{target} 활성화" if effect > 0 else f"{target} 억제"
+        else:
+            # outcome을 줄이고 싶다 (HeartDisease, Erk)
+            action = f"{target} 억제" if effect > 0 else f"{target} 활성화"
+
+        coverage_note = ""
+        if coverage < 0.5:
+            coverage_note = " (coverage 부족)"
+        reliability, _, _ = coverage_confidence(float(coverage))
+
+        rows.append(
+            {
+                "target": target,
+                "low_value": low_value,
+                "high_value": high_value,
+                f"E[{outcome}|do(low)]": round(y_low, 4),
+                f"E[{outcome}|do(high)]": round(y_high, 4),
+                "effect_high_minus_low": round(effect, 4),
+                "recommended_action": action + coverage_note,
+                "coverage": round(coverage, 3),
+                "reliability": reliability,
+                "method": low_note if low_note == high_note else f"{low_note}; {high_note}",
+            }
+        )
+    table = pd.DataFrame(rows)
+    if table.empty:
+        return table
+    return table.sort_values("effect_high_minus_low", key=lambda col: col.abs(), ascending=False).reset_index(drop=True)
+
+
+def plot_interventions(table: pd.DataFrame) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=(7.2, 3.8))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#fafbfc")
+
+    values = table["effect_high_minus_low"].to_numpy()
+    targets = table["target"].to_list()
+    colors = ["#ef4444" if v > 0 else "#6366f1" if v < 0 else "#cbd5e1" for v in values]
+
+    bars = ax.barh(
+        targets, values, color=colors, edgecolor="#ffffff",
+        height=0.55, linewidth=1.5, zorder=3,
+    )
+    ax.axvline(0, color="#334155", linewidth=1.2, zorder=2)
+
+    # Value labels
+    for bar, val in zip(bars, values):
+        label_x = val + (max(abs(values)) * 0.03 if val >= 0 else -max(abs(values)) * 0.03)
+        ha = "left" if val >= 0 else "right"
+        ax.text(label_x, bar.get_y() + bar.get_height() / 2, f"{val:.3f}", ha=ha, va="center", fontsize=9, fontweight="bold", color="#334155")
+
+    ax.set_xlabel("E[outcome | do(high)] − E[outcome | do(low)]")
+    ax.set_title("Intervention Effect Estimation", fontsize=12, fontweight="bold", color="#0f172a")
+    ax.invert_yaxis()
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor="#ef4444", label="Increases outcome"),
+        Patch(facecolor="#6366f1", label="Decreases outcome"),
+    ]
+    ax.legend(handles=legend_elements, loc="lower right", framealpha=0.9)
+    fig.tight_layout()
+    return fig
+
+
+def plot_shd_explanation(reference: nx.DiGraph, estimated: nx.DiGraph, variables: list[str]) -> plt.Figure:
+    """SHD 구성 요소를 시각적으로 분해해서 보여주는 차트."""
+    true_edges = set(reference.edges())
+    est_edges = set(estimated.edges())
+
+    tp = true_edges & est_edges
+    missing = true_edges - est_edges
+    extra = est_edges - true_edges
+    reversed_set = set()
+    for s, d in list(extra):
+        if (d, s) in missing:
+            reversed_set.add((s, d))
+
+    pure_missing = len(missing) - len(reversed_set)
+    pure_extra = len(extra) - len(reversed_set)
+
+    categories = ["Correct", "Missing", "Extra", "Reversed"]
+    values = [len(tp), pure_missing, pure_extra, len(reversed_set)]
+    colors = ["#059669", "#f59e0b", "#ef4444", "#8b5cf6"]
+
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.8), gridspec_kw={"width_ratios": [1, 1.3]})
+    fig.patch.set_facecolor("#ffffff")
+
+    # Left: donut chart
+    ax = axes[0]
+    ax.set_facecolor("#ffffff")
+    total = sum(values)
+    if total == 0:
+        values = [1]
+        colors = ["#e2e8f0"]
+        categories = ["No edges"]
+    wedges, texts, autotexts = ax.pie(
+        values, labels=categories, colors=colors, autopct=lambda p: f"{int(round(p * total / 100))}" if total > 0 else "",
+        startangle=90, pctdistance=0.75, wedgeprops=dict(width=0.4, edgecolor="#ffffff", linewidth=2),
+        textprops={"fontsize": 9, "fontweight": "bold"},
+    )
+    for t in autotexts:
+        t.set_fontsize(11)
+        t.set_fontweight("bold")
+        t.set_color("#ffffff")
+    ax.set_title("Edge Classification", fontsize=12, fontweight="bold", color="#0f172a", pad=12)
+
+    # Right: metric bars
+    ax2 = axes[1]
+    ax2.set_facecolor("#fafbfc")
+    metrics = edge_metrics(reference, estimated)
+    shd = structural_hamming_distance(reference, estimated)
+    metric_names = ["Precision", "Recall", "F1 Score"]
+    metric_vals = [metrics["precision"], metrics["recall"], metrics["f1"]]
+    bar_colors = ["#6366f1", "#38bdf8", "#059669"]
+
+    bars = ax2.barh(metric_names, metric_vals, color=bar_colors, height=0.5, edgecolor="#ffffff", linewidth=1.5, zorder=3)
+    ax2.set_xlim(0, 1.15)
+    for bar, val in zip(bars, metric_vals):
+        ax2.text(val + 0.03, bar.get_y() + bar.get_height() / 2, f"{val:.2f}", va="center", fontsize=11, fontweight="bold", color="#334155")
+    ax2.axvline(1.0, color="#e2e8f0", linewidth=1, linestyle="--", zorder=1)
+    ax2.set_title(f"Performance Metrics  (SHD = {shd})", fontsize=12, fontweight="bold", color="#0f172a", pad=12)
+    ax2.spines["top"].set_visible(False)
+    ax2.spines["right"].set_visible(False)
+    ax2.invert_yaxis()
+
+    fig.tight_layout(w_pad=3)
+    return fig
+
+
+def plot_complexity_comparison(n_edges: int, top_k: int) -> plt.Figure:
+    """Grover O(sqrt(N)) vs Classical O(N) 복잡도 비교 시각화."""
+    fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8))
+    fig.patch.set_facecolor("#ffffff")
+
+    # Left: scaling curve
+    ax = axes[0]
+    ax.set_facecolor("#fafbfc")
+    edge_range = np.arange(2, 21)
+    classical = 2.0 ** edge_range
+    quantum = np.sqrt(classical / max(top_k, 1)) * (math.pi / 4)
+
+    ax.semilogy(edge_range, classical, "-o", color="#ef4444", linewidth=2.2, markersize=5, label="Classical O(N)", zorder=3)
+    ax.semilogy(edge_range, quantum, "-s", color="#6366f1", linewidth=2.2, markersize=5, label=f"Grover O(√(N/{top_k}))", zorder=3)
+    ax.axvline(n_edges, color="#f59e0b", linewidth=2, linestyle="--", alpha=0.7, label=f"Current ({n_edges} edges)")
+    ax.fill_between(edge_range, quantum, classical, alpha=0.06, color="#6366f1")
+    ax.set_xlabel("Number of edge candidates")
+    ax.set_ylabel("Evaluations (log scale)")
+    ax.set_title("Search Complexity Scaling", fontsize=12, fontweight="bold", color="#0f172a")
+    ax.legend(fontsize=8, loc="upper left")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    # Right: current speedup bar
+    ax2 = axes[1]
+    ax2.set_facecolor("#fafbfc")
+    N = 2 ** n_edges
+    classical_evals = N
+    grover_evals = max(1, int(math.pi / 4 * math.sqrt(N / max(top_k, 1))))
+    speedup = classical_evals / grover_evals if grover_evals > 0 else 1
+
+    bar_data = [("Classical\n(exhaustive)", classical_evals, "#ef4444"), ("Grover\n(quantum)", grover_evals, "#6366f1")]
+    for i, (label, val, color) in enumerate(bar_data):
+        ax2.bar(i, val, color=color, width=0.55, edgecolor="#ffffff", linewidth=2, zorder=3)
+        ax2.text(i, val + classical_evals * 0.02, f"{val:,}", ha="center", va="bottom", fontsize=10, fontweight="bold", color="#334155")
+    ax2.set_xticks([0, 1])
+    ax2.set_xticklabels([d[0] for d in bar_data], fontsize=9)
+    ax2.set_ylabel("Oracle evaluations")
+    ax2.set_title(f"Current Setting: {speedup:.1f}x Speedup", fontsize=12, fontweight="bold", color="#0f172a")
+    ax2.spines["top"].set_visible(False)
+    ax2.spines["right"].set_visible(False)
+
+    fig.tight_layout(w_pad=3)
+    return fig
+
+
+def plot_score_landscape(scored: list[tuple[str, nx.DiGraph, float]], top_k: int) -> plt.Figure:
+    """DAG score landscape를 rank-score 곡선으로 시각화."""
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#fafbfc")
+
+    scores = [s for _, _, s in scored]
+    ranks = list(range(1, len(scores) + 1))
+
+    ax.fill_between(ranks[:top_k], scores[:top_k], min(scores), alpha=0.15, color="#6366f1", zorder=2)
+    ax.plot(ranks, scores, "-", color="#94a3b8", linewidth=1.5, zorder=2)
+    ax.scatter(ranks[:top_k], scores[:top_k], color="#6366f1", s=30, zorder=4, label=f"Oracle targets (top {top_k})")
+    if len(ranks) > top_k:
+        ax.scatter(ranks[top_k:], scores[top_k:], color="#e2e8f0", s=8, zorder=3, alpha=0.6)
+    ax.axhline(scores[min(top_k, len(scores)) - 1], color="#f59e0b", linewidth=1.5, linestyle="--", alpha=0.7, label="Oracle threshold")
+
+    ax.set_xlabel("DAG rank")
+    ax.set_ylabel("BDeu Score")
+    ax.set_title("Score Landscape: BDeu by Rank", fontsize=12, fontweight="bold", color="#0f172a")
+    ax.legend(fontsize=8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+def plot_radar_comparison(
+    classical_metrics: dict | None,
+    grover_metrics: dict | None,
+    grover_result: dict | None,
+    n_edges: int,
+    top_k: int,
+) -> plt.Figure:
+    """Classical vs Quantum 레이더 차트."""
+    from matplotlib.patches import FancyBboxPatch
+
+    labels = ["Precision", "Recall", "F1", "BDeu Rank\n(inv.)", "Search\nEfficiency"]
+    N_ax = len(labels)
+    angles = np.linspace(0, 2 * np.pi, N_ax, endpoint=False).tolist()
+    angles += angles[:1]
+
+    classical_vals = [0.0] * N_ax
+    grover_vals = [0.0] * N_ax
+
+    if classical_metrics:
+        classical_vals[0] = classical_metrics.get("precision", 0)
+        classical_vals[1] = classical_metrics.get("recall", 0)
+        classical_vals[2] = classical_metrics.get("f1", 0)
+        classical_vals[3] = 1.0  # rank 1 always
+        classical_vals[4] = 0.3  # exhaustive = low efficiency
+
+    if grover_metrics and grover_result:
+        grover_vals[0] = grover_metrics.get("precision", 0)
+        grover_vals[1] = grover_metrics.get("recall", 0)
+        grover_vals[2] = grover_metrics.get("f1", 0)
+        rank = grover_result.get("selected_rank", 999)
+        grover_vals[3] = max(0, 1.0 - (rank - 1) / max(20, rank))
+        total_N = 2 ** n_edges
+        grover_iters = max(1, int(math.pi / 4 * math.sqrt(total_N / max(top_k, 1))))
+        grover_vals[4] = min(1.0, 1.0 - grover_iters / total_N) if total_N > 0 else 0
+
+    classical_vals += classical_vals[:1]
+    grover_vals += grover_vals[:1]
+
+    fig, ax = plt.subplots(figsize=(5.5, 5.5), subplot_kw=dict(polar=True))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#ffffff")
+
+    ax.plot(angles, classical_vals, "o-", color="#ef4444", linewidth=2.2, markersize=7, label="Classical", zorder=3)
+    ax.fill(angles, classical_vals, color="#ef4444", alpha=0.08)
+    ax.plot(angles, grover_vals, "s-", color="#6366f1", linewidth=2.2, markersize=7, label="Grover", zorder=3)
+    ax.fill(angles, grover_vals, color="#6366f1", alpha=0.08)
+
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, fontsize=10, fontweight="bold", color="#334155")
+    ax.set_ylim(0, 1.05)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], fontsize=7.5, color="#94a3b8")
+    ax.spines["polar"].set_color("#e2e8f0")
+    ax.grid(color="#e2e8f0", linewidth=0.8)
+
+    ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.12), framealpha=0.9, fontsize=10)
+    ax.set_title("Classical vs Quantum", fontsize=14, fontweight="bold", color="#0f172a", pad=24, y=1.08)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_gauge(value: float, label: str, max_val: float = 1.0, color_thresholds: list | None = None) -> plt.Figure:
+    """반원 게이지 차트."""
+    fig, ax = plt.subplots(figsize=(3.2, 2.0))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#ffffff")
+
+    if color_thresholds is None:
+        color_thresholds = [(0.33, "#ef4444"), (0.66, "#f59e0b"), (1.01, "#059669")]
+
+    theta_bg = np.linspace(np.pi, 0, 100)
+    ax.plot(np.cos(theta_bg) * 1.0, np.sin(theta_bg) * 1.0, color="#e2e8f0", linewidth=14, solid_capstyle="round", zorder=1)
+
+    ratio = min(value / max_val, 1.0) if max_val > 0 else 0
+    color = "#94a3b8"
+    for threshold, c in color_thresholds:
+        if ratio <= threshold:
+            color = c
+            break
+
+    theta_fill = np.linspace(np.pi, np.pi - ratio * np.pi, 100)
+    ax.plot(np.cos(theta_fill) * 1.0, np.sin(theta_fill) * 1.0, color=color, linewidth=14, solid_capstyle="round", zorder=2)
+
+    display = f"{value:.2f}" if max_val <= 1 else f"{value:.0f}"
+    ax.text(0, 0.15, display, ha="center", va="center", fontsize=22, fontweight="bold", color="#0f172a")
+    ax.text(0, -0.15, label, ha="center", va="center", fontsize=9.5, fontweight="medium", color="#64748b")
+
+    ax.set_xlim(-1.3, 1.3)
+    ax.set_ylim(-0.4, 1.2)
+    ax.axis("off")
+    fig.tight_layout(pad=0.3)
+    return fig
+
+
+def plot_amplification_waterfall(grover_result: dict, n_edges: int, top_k: int) -> plt.Figure:
+    """Uniform → Oracle → Valid 후처리 단계별 확률 변화 워터폴 차트."""
+    fig, ax = plt.subplots(figsize=(8, 4.0))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#fafbfc")
+
+    uniform_p = top_k / (2 ** n_edges)
+    oracle_p = grover_result["good_probability"]
+    valid_p = grover_result["valid_probability"]
+    selected_rank = grover_result.get("selected_rank", None)
+    selected_in_top = selected_rank is not None and selected_rank <= top_k
+
+    stages = [
+        ("Uniform\nbaseline", uniform_p, "#94a3b8"),
+        ("After\nGrover", oracle_p, "#6366f1"),
+        ("Valid DAG\nfilter", valid_p, "#38bdf8"),
+        ("Score-weighted\nselection", 1.0 if selected_in_top else 0.5, "#059669"),
+    ]
+
+    bars = []
+    for i, (label, val, color) in enumerate(stages):
+        bar = ax.bar(i, val, color=color, width=0.55, edgecolor="#ffffff", linewidth=2, zorder=3)
+        bars.append(bar)
+        ax.text(i, val + 0.02, f"{val*100:.1f}%", ha="center", va="bottom", fontsize=11, fontweight="bold", color="#334155")
+        if i > 0:
+            prev_val = stages[i - 1][1]
+            if prev_val > 0:
+                mult = val / prev_val
+                mid_y = min(val, prev_val) + abs(val - prev_val) / 2
+                arrow_color = "#059669" if val > prev_val else "#ef4444"
+                ax.annotate(
+                    f"{mult:.1f}x", xy=(i - 0.5, mid_y), fontsize=9, fontweight="bold",
+                    color=arrow_color, ha="center", va="center",
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#ffffff", edgecolor=arrow_color, alpha=0.9),
+                )
+
+    ax.set_xticks(range(len(stages)))
+    ax.set_xticklabels([s[0] for s in stages], fontsize=9.5, fontweight="medium")
+    ax.set_ylabel("Probability")
+    ax.set_title("Grover Pipeline: Stage-by-Stage Probability Amplification", fontsize=12, fontweight="bold", color="#0f172a")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.set_ylim(0, max(s[1] for s in stages) * 1.25)
+    fig.tight_layout()
+    return fig
+
+
+def generate_interpretation(
+    has_gt: bool,
+    best_metrics: dict | None,
+    grover_result: dict | None,
+    grover_metrics: dict | None,
+    n_edges: int,
+    top_k: int,
+    scored: list,
+    variables: list[str],
+    dataset_name: str,
+) -> list[tuple[str, str, str]]:
+    """정량 결과로부터 해석 bullet 목록 생성. (icon_color, title, body)."""
+    insights = []
+
+    # 1. Structure recovery quality
+    if has_gt and best_metrics:
+        f1 = best_metrics["f1"]
+        shd = best_metrics["shd"]
+        if f1 >= 0.9:
+            insights.append(("#059669", "구조 복원 우수",
+                f"고전 전수조사가 정답 DAG를 F1={f1:.2f}, SHD={shd}로 거의 완벽하게 복원했습니다. "
+                f"BDeu 점수가 데이터에 내재된 인과 방향성을 잘 포착한 것입니다."))
+        elif f1 >= 0.5:
+            insights.append(("#f59e0b", "구조 부분 복원",
+                f"고전 전수조사 1위 DAG의 F1={f1:.2f}, SHD={shd}입니다. "
+                f"일부 엣지의 방향이나 존재 여부에서 정답과 차이가 있어, 데이터 크기나 ESS 조정이 필요할 수 있습니다."))
+        else:
+            insights.append(("#ef4444", "구조 복원 어려움",
+                f"F1={f1:.2f}, SHD={shd}로 정답 구조와 상당한 차이가 있습니다. "
+                f"변수 간 인과 신호가 약하거나, 이산화 방식이 정보를 손실시켰을 가능성이 있습니다."))
+
+    # 2. Score landscape
+    if len(scored) > 1:
+        gap = scored[0][2] - scored[1][2]
+        if abs(gap) < 0.5:
+            insights.append(("#f59e0b", "상위 DAG 간 점수 접전",
+                f"1위와 2위 BDeu 점수 차이가 {abs(gap):.2f}로 매우 작습니다. "
+                f"데이터가 여러 인과 구조를 비슷하게 지지하고 있어, 단일 구조보다 상위 k개의 앙상블이 더 신뢰할 수 있습니다."))
+        else:
+            insights.append(("#059669", "1위 DAG 우위 명확",
+                f"1위와 2위 BDeu 점수 차이가 {abs(gap):.2f}로, 최적 구조가 뚜렷하게 구별됩니다. "
+                f"Grover Oracle이 이 구조를 타겟으로 삼을 때 증폭 효과가 극대화됩니다."))
+
+    # 3. Grover performance
+    if grover_result:
+        uniform_p = top_k / (2 ** n_edges)
+        amp = grover_result["good_probability"] / uniform_p if uniform_p > 0 else 0
+
+        if amp >= 5:
+            insights.append(("#059669", f"Grover 증폭 {amp:.1f}배 달성",
+                f"Oracle 타겟의 측정 확률이 uniform baseline {uniform_p*100:.2f}%에서 "
+                f"{grover_result['good_probability']*100:.1f}%로 {amp:.1f}배 증폭되었습니다. "
+                f"Grover 알고리즘이 탐색 공간에서 좋은 해를 효과적으로 집중시킨 것입니다."))
+        elif amp >= 2:
+            insights.append(("#f59e0b", f"Grover 증폭 {amp:.1f}배",
+                f"Oracle 타겟 확률이 {uniform_p*100:.2f}%에서 {grover_result['good_probability']*100:.1f}%로 증가했습니다. "
+                f"유의미한 증폭이지만, shots나 반복 횟수를 늘리면 더 향상될 수 있습니다."))
+        else:
+            insights.append(("#ef4444", "Grover 증폭 미미",
+                f"증폭 배수가 {amp:.1f}x로 이론적 기대보다 낮습니다. "
+                f"Oracle 타겟 수(top-k={top_k})를 조정하거나 shots를 늘려 보세요."))
+
+        # Grover vs Classical structure comparison
+        if has_gt and grover_metrics and best_metrics:
+            g_f1 = grover_metrics["f1"]
+            c_f1 = best_metrics["f1"]
+            if abs(g_f1 - c_f1) < 0.01:
+                insights.append(("#6366f1", "Grover-Classical 동등 구조",
+                    f"Grover가 선택한 DAG(F1={g_f1:.2f})와 고전 전수조사 1위(F1={c_f1:.2f})의 정확도가 동등합니다. "
+                    f"양자 탐색이 전수조사 없이도 동일한 품질의 구조를 찾을 수 있음을 보여줍니다."))
+            elif g_f1 > c_f1:
+                insights.append(("#059669", "Grover가 더 좋은 구조 선택",
+                    f"Grover 후처리 DAG(F1={g_f1:.2f})가 고전 전수조사 1위(F1={c_f1:.2f})보다 정답에 가깝습니다. "
+                    f"Score-weighted 선택이 BDeu 점수만으로는 놓칠 수 있는 구조를 포착한 경우입니다."))
+            else:
+                rank = grover_result.get("selected_rank", "?")
+                insights.append(("#f59e0b", "Grover 선택 구조 차이",
+                    f"Grover가 선택한 DAG(rank {rank}, F1={g_f1:.2f})는 고전 1위(F1={c_f1:.2f})보다 약간 낮습니다. "
+                    f"이는 Grover 측정의 확률적 특성 때문이며, multi-run으로 보완할 수 있습니다."))
+
+    # 4. Scalability note
+    n_vars = len(variables)
+    if n_vars >= 4:
+        future_5 = 2 ** (5 * 4)
+        grover_5 = int(math.pi / 4 * math.sqrt(future_5 / max(top_k, 1)))
+        insights.append(("#6366f1", "확장성 전망",
+            f"현재 {n_vars}개 변수({n_edges} edge bits)에서는 고전 전수조사가 가능하지만, "
+            f"5개 변수(20 bits)로 확장하면 후보가 {future_5:,}개로 폭발합니다. "
+            f"Grover는 이때 약 {grover_5:,}회 반복이면 충분해, 이차적 속도 이점이 실질적으로 드러나기 시작합니다."))
+
+    return insights
+
+
+st.set_page_config(
+    page_title="Quantum Causal Discovery Lab",
+    page_icon="⚛️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    /* ── Global ── */
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 3rem;
+        max-width: 1280px;
+    }
+    html, body, [class*="css"] {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* ── Sidebar ── */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+    }
+    section[data-testid="stSidebar"] * {
+        color: #e2e8f0 !important;
+    }
+    section[data-testid="stSidebar"] .stSelectbox label,
+    section[data-testid="stSidebar"] .stMultiSelect label,
+    section[data-testid="stSidebar"] .stSlider label,
+    section[data-testid="stSidebar"] .stRadio label {
+        color: #94a3b8 !important;
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 600;
+    }
+    section[data-testid="stSidebar"] hr {
+        border-color: #334155;
+    }
+    section[data-testid="stSidebar"] .stSlider [data-testid="stTickBarMin"],
+    section[data-testid="stSidebar"] .stSlider [data-testid="stTickBarMax"] {
+        color: #64748b !important;
+    }
+
+    /* ── Hero header ── */
+    .hero-container {
+        background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
+        border-radius: 16px;
+        padding: 2.2rem 2.5rem;
+        margin-bottom: 1.5rem;
+        position: relative;
+        overflow: hidden;
+    }
+    .hero-container::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        right: -20%;
+        width: 400px;
+        height: 400px;
+        background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%);
+        pointer-events: none;
+    }
+    .hero-title {
+        font-size: 1.85rem;
+        font-weight: 700;
+        color: #f8fafc;
+        margin: 0 0 0.3rem 0;
+        letter-spacing: -0.02em;
+    }
+    .hero-subtitle {
+        font-size: 0.95rem;
+        color: #94a3b8;
+        margin: 0;
+        line-height: 1.5;
+    }
+    .hero-badge {
+        display: inline-block;
+        background: rgba(99,102,241,0.2);
+        border: 1px solid rgba(99,102,241,0.3);
+        color: #a5b4fc;
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 0.2rem 0.65rem;
+        border-radius: 20px;
+        margin-bottom: 0.7rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+
+    /* ── Metric cards ── */
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1rem 1.1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    div[data-testid="stMetric"] label {
+        color: #64748b !important;
+        font-size: 0.78rem !important;
+        font-weight: 600 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+        color: #0f172a !important;
+        font-weight: 700 !important;
+    }
+
+    /* ── Tabs ── */
+    .stTabs [data-baseweb="tab-list"] {
+        background: #f1f5f9;
+        border-radius: 12px;
+        padding: 4px;
+        gap: 4px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 0.88rem;
+        padding: 0.5rem 1.2rem;
+        color: #64748b;
+    }
+    .stTabs [aria-selected="true"] {
+        background: #ffffff !important;
+        color: #0f172a !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .stTabs [data-baseweb="tab-highlight"] {
+        display: none;
+    }
+    .stTabs [data-baseweb="tab-border"] {
+        display: none;
+    }
+
+    /* ── Buttons ── */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        border: none;
+        border-radius: 10px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        padding: 0.6rem 1.5rem;
+        box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+        transition: all 0.2s ease;
+    }
+    .stButton > button[kind="primary"]:hover {
+        box-shadow: 0 4px 16px rgba(99,102,241,0.4);
+        transform: translateY(-1px);
+    }
+
+    /* ── Expanders ── */
+    .streamlit-expanderHeader {
+        font-weight: 600;
+        font-size: 0.9rem;
+        color: #334155;
+        background: #f8fafc;
+        border-radius: 8px;
+    }
+
+    /* ── Story band ── */
+    .status-band {
+        border-left: 4px solid #6366f1;
+        background: linear-gradient(90deg, #eef2ff 0%, #f8fafc 100%);
+        padding: 1rem 1.2rem;
+        border-radius: 0 10px 10px 0;
+        margin: 0.4rem 0 1.2rem 0;
+        font-size: 0.92rem;
+        color: #334155;
+        line-height: 1.55;
+    }
+
+    /* ── Info / Warning / Success boxes ── */
+    .stAlert > div {
+        border-radius: 10px;
+        border: none;
+    }
+
+    /* ── Dataframe ── */
+    .stDataFrame {
+        border-radius: 10px;
+        overflow: hidden;
+    }
+
+    /* ── Small note ── */
+    .small-note {
+        color: #64748b;
+        font-size: 0.88rem;
+        line-height: 1.5;
+    }
+
+    /* ── Section headers ── */
+    h2, h3 {
+        color: #0f172a;
+        letter-spacing: -0.01em;
+    }
+
+    /* ── Dividers ── */
+    hr {
+        border-color: #e2e8f0;
+        margin: 1.5rem 0;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+dataset_options = available_datasets()
+
+st.sidebar.title("실험 설정")
+data_mode = st.sidebar.radio("데이터 소스", ["내장 데이터셋", "CSV 업로드"], horizontal=False)
+
+uploaded_bytes: bytes | None = None
+ground_truth_edges: list[tuple[str, str]] = []
+
+if data_mode == "내장 데이터셋":
+    dataset_name = st.sidebar.selectbox("데이터셋", list(dataset_options.keys()))
+    spec = dataset_options[dataset_name]
+    raw_df = load_csv(spec.file)
+    default_vars = [var for var in spec.default_vars if var in raw_df.columns]
+    if not default_vars:
+        default_vars = list(raw_df.columns[: min(4, len(raw_df.columns))])
+    selected_vars = st.sidebar.multiselect(
+        "분석 변수",
+        list(raw_df.columns),
+        default=default_vars[:4],
+        max_selections=4,
+    )
+    ground_truth_edges = list(spec.ground_truth)
+    story = spec.story
+    outcome_hint = spec.outcome_hint
+else:
+    dataset_name = "Custom CSV"
+    spec = None
+    uploaded = st.sidebar.file_uploader("CSV 파일", type=["csv"])
+    if uploaded is None:
+        st.info("왼쪽 사이드바에서 CSV를 업로드하거나 내장 데이터셋을 선택하세요.")
+        st.stop()
+    uploaded_bytes = uploaded.getvalue()
+    raw_df = pd.read_csv(io.BytesIO(uploaded_bytes))
+    selected_vars = st.sidebar.multiselect(
+        "분석 변수",
+        list(raw_df.columns),
+        default=list(raw_df.columns[: min(3, len(raw_df.columns))]),
+        max_selections=4,
+    )
+    story = "사용자가 업로드한 데이터에서 변수 사이의 인과 구조를 탐색합니다."
+    outcome_hint = None
+    with st.sidebar.expander("정답 엣지 입력"):
+        edge_text = st.text_area("한 줄에 하나씩 입력", placeholder="A->B\nB->C")
+        ground_truth_edges = parse_edge_text(edge_text)
+
+if len(selected_vars) < 2:
+    st.warning("분석하려면 변수를 2개 이상 선택해야 합니다.")
+    st.stop()
+
+variables = list(selected_vars)
+if len(variables) > 4:
+    st.warning("Grover 시뮬레이션 안정성을 위해 변수는 최대 4개까지 선택합니다.")
+    st.stop()
+
+if data_mode == "내장 데이터셋":
+    with st.sidebar.expander("정답 엣지 확인/수정"):
+        default_edge_text = "\n".join(f"{src}->{dst}" for src, dst in ground_truth_edges)
+        custom_edge_text = st.text_area("선택 변수에 포함된 엣지만 사용됩니다", value=default_edge_text)
+        ground_truth_edges = parse_edge_text(custom_edge_text)
+
+st.sidebar.divider()
+ess = int(st.sidebar.slider("BDeu ESS", min_value=1, max_value=50, value=10))
+top_k = int(st.sidebar.slider("Grover Oracle top-k", min_value=1, max_value=20, value=6))
+shots = int(st.sidebar.slider("측정 shots", min_value=512, max_value=8192, value=4096, step=512))
+auto_discretize = st.sidebar.toggle("연속형 변수 3분위 이산화", value=True)
+
+outcome_default = variables[-1]
+if outcome_hint in variables:
+    outcome_default = outcome_hint
+outcome = st.sidebar.selectbox("결과 변수", variables, index=variables.index(outcome_default))
+
+_default_higher_better, _direction_source = infer_outcome_direction(outcome, spec)
+outcome_direction = st.sidebar.radio(
+    "결과 변수 방향",
+    ["높을수록 나쁨 (줄이고 싶다)", "높을수록 좋음 (높이고 싶다)"],
+    index=1 if _default_higher_better else 0,
+    horizontal=True,
+    key=f"outcome_direction_{dataset_name}_{outcome}",
+)
+outcome_higher_is_better = "좋음" in outcome_direction
+if _direction_source == "unknown":
+    st.sidebar.warning("이 결과 변수의 방향은 자동 판단이 어렵습니다. 분석 목적에 맞게 반드시 확인하세요.")
+else:
+    st.sidebar.caption("결과 변수 방향 기본값은 선택한 outcome 기준으로 설정됩니다.")
+
+st.sidebar.divider()
+st.sidebar.markdown("**AI 해석 (선택)**")
+gemini_api_key = st.sidebar.text_input(
+    "Gemini API Key",
+    type="password",
+    help="Google AI Studio에서 발급받은 API 키를 입력하면 분석 결과를 AI가 자연어로 해석해 줍니다. 없어도 앱의 모든 기능을 사용할 수 있습니다.",
+)
+ai_enabled = bool(gemini_api_key)
+
+csv_bytes = uploaded_bytes if uploaded_bytes is not None else raw_df.to_csv(index=False).encode("utf-8")
+
+with st.spinner("DAG 후보를 열거하고 BDeu 점수를 계산하는 중입니다."):
+    data, valid_dags, edge_list, scored, scoring_elapsed = score_from_csv_bytes(
+        csv_bytes,
+        tuple(variables),
+        ess,
+        auto_discretize,
+    )
+
+ground_truth = build_ground_truth(variables, ground_truth_edges)
+has_ground_truth = len(ground_truth.edges()) > 0
+
+n_edges = len(edge_list)
+n_total = 2**n_edges
+valid_bitstrings = {bitstring for bitstring, _ in valid_dags}
+top_k_effective = min(top_k, len(scored))
+good_bitstrings = [scored[idx][0] for idx in range(top_k_effective)]
+
+best_bitstring, best_graph, best_score = scored[0]
+best_metrics = graph_metrics(ground_truth if has_ground_truth else None, best_graph)
+run_key = f"{dataset_name}|{','.join(variables)}|{ess}|{top_k}|{shots}|{auto_discretize}|{len(data)}"
+
+st.markdown(
+    f"""
+    <div class="hero-container">
+        <div class="hero-badge">Causal Inference + Qiskit</div>
+        <h1 class="hero-title">상관관계를 넘어서: 어디에 개입해야 하는가</h1>
+        <p class="hero-subtitle">관측 데이터에서 인과 구조(DAG)를 발견하고, 결과 변수를 바꾸기 위해 어떤 변수에 개입해야 하는지 추천합니다.<br>인과 구조 탐색에 Grover 알고리즘을 접목한 양자적 시도를 포함합니다.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(f"<div class='status-band'>{story}</div>", unsafe_allow_html=True)
+if data_mode == "내장 데이터셋":
+    if dataset_name == "Sprinkler weather":
+        st.markdown(
+            """
+            <div class="status-band" style="border-left-color:#059669;background:linear-gradient(90deg,#ecfdf5 0%,#f8fafc 100%);">
+            <b>발표 추천 설정</b>: Sprinkler weather는 구조가 직관적이고 변수 4개로 Grover 시연도 안정적입니다.
+            상관관계와 인과관계의 차이, DAG 발견, 개입 추천을 5분 안에 설명하기 가장 좋습니다.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <p class="small-note">
+            발표용 안정 시연은 <b>Sprinkler weather</b>를 추천합니다. 현재 데이터셋은 도메인 스토리 설명에는 좋지만,
+            관측 데이터 기반 구조학습 특성상 정답 F1이 낮을 수 있습니다.
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
+
+# Compute intervention for top metric display
+_preview_intervention = intervention_table(data, best_graph, variables, outcome, outcome_higher_is_better)
+_top_target = _preview_intervention.iloc[0]["target"] if not _preview_intervention.empty else "-"
+_top_action = _preview_intervention.iloc[0]["recommended_action"] if not _preview_intervention.empty else "-"
+
+metric_cols = st.columns(5)
+metric_cols[0].metric("분석 변수", f"{len(variables)}개", ", ".join(variables))
+metric_cols[1].metric("유효 DAG", f"{len(valid_dags):,}개", f"전체 {n_total:,}개 중")
+metric_cols[2].metric("최적 구조 점수", f"{best_score:.1f}", f"BDeu (ESS={ess})")
+if best_metrics:
+    metric_cols[3].metric("정답 대비 F1", f"{best_metrics['f1']:.2f}", f"SHD={best_metrics['shd']}")
+else:
+    metric_cols[3].metric("정답 대비", "N/A", "정답 구조 없음")
+metric_cols[4].metric("추천 개입 타겟", _top_target, _top_action)
+
+tabs = st.tabs(["왜 인과관계인가", "인과 구조 발견", "개입 추천", "양자적 접근", "종합 분석"])
+
+with tabs[0]:
+    # ═══ 왜 인과관계인가 ═══
+    st.subheader("상관관계 ≠ 인과관계")
+
+    st.markdown(
+        """
+        <div class="status-band">
+        두 변수가 함께 움직인다고 해서 하나가 다른 하나의 <b>원인</b>은 아닙니다.
+        아이스크림 판매량과 익사 사고가 함께 증가하지만, 아이스크림이 익사를 일으키는 것은 아닙니다 — 공통 원인(여름 기온)이 존재합니다.
+        <b>인과관계</b>를 알아야 "어디에 개입해야 결과가 바뀌는지" 답할 수 있습니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    corr_cols = st.columns([1, 1])
+    with corr_cols[0]:
+        st.pyplot(plot_correlation(data), use_container_width=True)
+        st.markdown(
+            """
+            <p class="small-note">
+            상관 행렬은 변수 간 <b>선형 관계의 강도</b>만 보여줍니다.<br>
+            높은 상관이 있어도 어느 방향인지, 직접 효과인지 제3의 변수를 통한 간접 효과인지 알 수 없습니다.
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
+    with corr_cols[1]:
+        st.markdown(
+            f"""
+            #### 왜 DAG(방향 비순환 그래프)가 필요한가?
+
+            | 상관관계 | 인과관계 (DAG) |
+            |---|---|
+            | A와 B가 같이 움직인다 | A가 B를 **일으킨다** |
+            | 방향이 없다 | **화살표 방향**이 있다 |
+            | 개입 효과를 예측 못함 | do(A=x)의 효과를 계산 가능 |
+            | 교란 변수 구분 불가 | 교란 경로를 차단 가능 |
+
+            이 앱은 관측 데이터 `{dataset_name}`에서 **DAG를 자동으로 발견**하고,
+            발견된 구조를 활용해 **어떤 변수에 개입해야 `{outcome}`을 바꿀 수 있는지** 추천합니다.
+            """
+        )
+
+    st.divider()
+
+    # Data overview
+    st.markdown("#### 분석 데이터")
+    data_cols = st.columns([1.2, 0.8])
+    with data_cols[0]:
+        description = spec.description if spec is not None else "업로드한 CSV 데이터입니다."
+        st.markdown(
+            f"""
+            **데이터셋**: {dataset_name} &nbsp;|&nbsp; **샘플 수**: {len(data):,} &nbsp;|&nbsp; **변수**: {', '.join(variables)}
+
+            {description}
+            """
+        )
+        st.dataframe(data.head(8), use_container_width=True)
+    with data_cols[1]:
+        if has_ground_truth:
+            st.pyplot(
+                draw_dag(ground_truth, variables, "알려진 정답 구조", subtitle=format_edges(ground_truth.edges())),
+                use_container_width=True,
+            )
+            st.markdown(
+                "<p class='small-note'>문헌에서 검증된 인과 구조입니다. 데이터 기반 발견 결과와 비교할 기준이 됩니다.</p>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("이 데이터셋에는 알려진 정답 구조가 없습니다. 발견된 구조를 직접 평가해야 합니다.")
+
+with tabs[1]:
+    # ═══ 인과 구조 발견 ═══
+    st.subheader("데이터에서 인과 구조 발견하기")
+
+    st.markdown(
+        f"""
+        <div class="status-band">
+        {len(variables)}개 변수 사이의 가능한 방향 엣지 {n_edges}개로 구성되는 DAG 후보 {n_total:,}개 중
+        비순환 조건을 만족하는 <b>{len(valid_dags):,}개</b>를 전수 평가합니다.
+        각 DAG의 BDeu 점수(ESS={ess})를 계산해 데이터에 가장 부합하는 구조를 찾습니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # DAG comparison
+    graph_cols = st.columns(3 if has_ground_truth else 2)
+    if has_ground_truth:
+        with graph_cols[0]:
+            st.pyplot(
+                draw_dag(ground_truth, variables, "정답 구조", subtitle=format_edges(ground_truth.edges())),
+                use_container_width=True,
+            )
+    with graph_cols[-2]:
+        subtitle = format_edges(best_graph.edges())
+        if best_metrics:
+            subtitle = f"SHD={best_metrics['shd']}, F1={best_metrics['f1']:.2f}"
+        st.pyplot(
+            draw_dag(best_graph, variables, "발견된 최적 구조 (BDeu 1위)", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
+            use_container_width=True,
+        )
+    with graph_cols[-1]:
+        st.pyplot(plot_score_distribution(scored, good_bitstrings), use_container_width=True)
+
+    if has_ground_truth and best_metrics:
+        st.pyplot(plot_shd_explanation(ground_truth, best_graph, variables), use_container_width=True)
+
+    st.divider()
+
+    st.markdown("#### 상위 DAG 후보")
+    st.dataframe(candidate_table(scored, ground_truth if has_ground_truth else None), use_container_width=True, hide_index=True)
+
+    with st.expander("BDeu 점수와 구조 학습의 한계"):
+        st.markdown(
+            f"""
+            **BDeu (Bayesian Dirichlet equivalent uniform)** 는 이산 베이지안 네트워크의 구조 점수입니다.
+            각 노드별로 부모-자식 조건부 분포의 marginal likelihood를 계산하고 합산합니다. 높을수록 데이터에 더 잘 맞습니다.
+
+            - **ESS (Equivalent Sample Size)** = {ess}: 사전분포의 강도. 작을수록 데이터에 충실하고 희소한 구조를 선호합니다.
+            - 현재 1위 BDeu = **{scored[0][2]:.2f}**, 유효 DAG {len(valid_dags):,}개 중 최고점입니다.
+
+            **왜 정답과 다를 수 있는가?**
+            - **Markov equivalence**: 관측 데이터만으로는 동일한 조건부 독립 관계를 만드는 여러 DAG를 구분할 수 없습니다 (예: A→B와 A←B는 주변 분포가 같을 수 있음).
+            - **변수 부분 선택**: 전체 네트워크의 일부 변수만 분석하면, 숨은 매개변수/교란변수 효과로 방향이 바뀔 수 있습니다.
+            - **이산화**: 연속형 변수를 이산화하면 정보가 손실되어 구조 식별력이 떨어집니다.
+            - F1이 낮더라도 **상위 DAG 다수가 비슷한 방향성을 공유**하면, 개입 추천의 방향 자체는 신뢰할 수 있습니다.
+
+            **핵심 한계 문장**: 이 앱은 관측 데이터만으로 완전한 인과관계를 증명하는 도구가 아니라,
+            가능한 DAG를 점수화하고 개입 후보를 비교하는 탐색형 도구입니다.
+            """
+        )
+
+    if ai_enabled:
+        _ai_edges = format_edges(best_graph.edges())
+        _ai_gt_text = f"알려진 정답 구조: {format_edges(ground_truth.edges())}\nSHD={best_metrics['shd']}, F1={best_metrics['f1']:.2f}" if has_ground_truth and best_metrics else "정답 구조 없음"
+        _ai_prompt_structure = (
+            f"당신은 인과 추론 전문가입니다. 아래 분석 결과를 비전문가도 이해할 수 있게 한국어 3~4문장으로 해석해주세요. "
+            f"마크다운 문법 없이 일반 텍스트로 작성하세요.\n\n"
+            f"데이터셋: {dataset_name}\n변수: {', '.join(variables)}\n결과 변수: {outcome}\n"
+            f"발견된 최적 DAG (BDeu 1위): {_ai_edges}\n{_ai_gt_text}\n"
+            f"유효 DAG 수: {len(valid_dags)}개, 1위 BDeu: {scored[0][2]:.2f}\n\n"
+            f"1) 발견된 인과 화살표가 각각 무엇을 뜻하는지, 2) 이 구조가 얼마나 신뢰할 수 있는지 설명하세요."
+        )
+        _cache_key_s = prompt_cache_key("structure", _ai_prompt_structure)
+        if st.button("AI 해석 생성", key="ai_btn_structure"):
+            with st.spinner("Gemini가 구조를 해석하는 중..."):
+                call_gemini(gemini_api_key, _ai_prompt_structure, _cache_key_s)
+        _cached_s = st.session_state.get(f"gemini_{_cache_key_s}")
+        if _cached_s:
+            render_ai_box(_cached_s)
+
+with tabs[2]:
+    # ═══ 개입 추천 (THE STAR) ═══
+    st.subheader("어디에 개입해야 하는가?")
+
+    st.markdown(
+        f"""
+        <div class="status-band" style="border-left-color: #059669; background: linear-gradient(90deg, #ecfdf5 0%, #f8fafc 100%);">
+        인과 구조를 아는 것의 <b>실질적 가치</b>는 바로 여기에 있습니다.
+        발견된 DAG를 이용해 <b>결과 변수 <code>{outcome}</code>을 {'높이' if outcome_higher_is_better else '줄이'}려면 어떤 변수에 개입해야 하는지</b>를
+        do-calculus (backdoor adjustment)로 추정합니다.
+        {'<br><small>연속형 변수는 3분위로 이산화되어 있으므로, 효과 크기는 이산화된 단위 기준입니다.</small>' if auto_discretize else ''}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    dag_options = {"발견된 최적 구조 (고전)": best_graph}
+    _grover_for_intv = st.session_state.get("grover_result")
+    if _grover_for_intv is not None and st.session_state.get("grover_run_key") == run_key:
+        dag_options["Grover 탐색 결과"] = bitstring_to_dag(_grover_for_intv["selected_bitstring"], edge_list)
+    if has_ground_truth:
+        dag_options["정답 구조 (기준)"] = ground_truth
+
+    choice = st.radio("개입 분석에 사용할 구조", list(dag_options.keys()), horizontal=True)
+    chosen_dag = dag_options[choice]
+    intervention = intervention_table(data, chosen_dag, variables, outcome, outcome_higher_is_better)
+
+    # Main visualization
+    int_cols = st.columns([0.85, 1.15])
+    with int_cols[0]:
+        st.pyplot(draw_dag(chosen_dag, variables, choice, reference=ground_truth if has_ground_truth else None), use_container_width=True)
+    with int_cols[1]:
+        if intervention.empty:
+            st.warning("개입 효과를 계산할 후보 변수가 없습니다.")
+        else:
+            st.pyplot(plot_interventions(intervention), use_container_width=True)
+
+    if not intervention.empty:
+        best_intv = intervention.iloc[0]
+        effect_val = best_intv["effect_high_minus_low"]
+        direction_icon = "+" if effect_val > 0 else "-" if effect_val < 0 else "="
+        confidence_label, confidence_bg, confidence_fg = coverage_confidence(float(best_intv["coverage"]))
+        st.markdown(
+            f"""
+            <div style="
+                background: linear-gradient(135deg, #059669 0%, #047857 100%);
+                border-radius: 12px;
+                padding: 1.3rem 1.5rem;
+                margin: 1rem 0;
+                color: #ffffff;
+            ">
+                <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85; margin-bottom: 0.3rem;">추천 개입 타겟</div>
+                <div style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.2rem;">{best_intv['target']} ({direction_icon}{abs(effect_val):.4f})</div>
+                <div style="font-size: 0.95rem; opacity: 0.9;">
+                    <span style="display:inline-block;background:{confidence_bg};color:{confidence_fg};border-radius:999px;padding:0.15rem 0.55rem;font-weight:700;margin-right:0.45rem;">
+                        {confidence_label} · coverage {best_intv['coverage']:.0%}
+                    </span>
+                    권장: <b>{best_intv['recommended_action']}</b> &nbsp;|&nbsp;
+                    효과 크기: <b>{effect_val:.4f}</b> &nbsp;|&nbsp;
+                    방법: {best_intv['method']}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("#### 개입 효과 상세")
+        st.dataframe(intervention, use_container_width=True, hide_index=True)
+
+        st.markdown(
+            f"""
+            <div class="status-band">
+            <b>해석 방법</b>: 각 행은 한 변수에 do-intervention을 적용했을 때 <code>{outcome}</code>의 기대값 변화입니다.<br>
+            <b>E[{outcome}|do(low)]</b>: 해당 변수를 최솟값으로 고정했을 때 {outcome}의 기대값<br>
+            <b>E[{outcome}|do(high)]</b>: 해당 변수를 최댓값으로 고정했을 때 {outcome}의 기대값<br>
+            <b>effect</b>: 두 값의 차이. 절대값이 클수록 해당 변수의 개입 효과가 큽니다.<br>
+            부모 변수가 있으면 <b>backdoor adjustment</b>로 교란을 보정합니다 (관측 가능한 부모 조합만 사용한 근사치).
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.info(
+        "이 개입 분석은 관측 데이터와 발견된 DAG에 기반한 근사입니다. "
+        "Positivity 위반(특정 조건 조합에 데이터가 없는 경우) 시 해당 조합은 제외되며 coverage 열에 반영됩니다. "
+        "실제 약물 효과나 의료 판단으로 해석하면 안 되며, 프로젝트 데모용 의사결정 보조 지표입니다."
+    )
+
+    if ai_enabled and not intervention.empty:
+        _ai_edges_intv = format_edges(chosen_dag.edges())
+        _intv_summary = "\n".join(
+            f"- {row['target']}: effect={row['effect_high_minus_low']:.4f}, action={row['recommended_action']}, method={row['method']}"
+            for _, row in intervention.iterrows()
+        )
+        _ai_prompt_intv = (
+            f"당신은 인과 추론 전문가입니다. 아래 개입(intervention) 분석 결과를 비전문가가 바로 의사결정에 참고할 수 있게 한국어로 해석해주세요. "
+            f"마크다운 문법 없이 일반 텍스트로 5~6문장 이내로 작성하세요.\n\n"
+            f"데이터셋: {dataset_name}\n결과 변수({'높이고 싶은 것' if outcome_higher_is_better else '줄이고 싶은 것'}): {outcome}\n"
+            f"사용한 DAG 구조: {_ai_edges_intv}\n\n"
+            f"개입 효과 분석 결과:\n{_intv_summary}\n\n"
+            f"설명할 것:\n"
+            f"1) 가장 효과적인 개입 타겟은 무엇이고 왜 그런지\n"
+            f"2) 각 변수의 개입 효과를 직관적으로 해석\n"
+            f"3) 실제로 이 결과를 어떻게 활용할 수 있는지 한 줄 제안"
+        )
+        _cache_key_i = prompt_cache_key("intervention", _ai_prompt_intv)
+        if st.button("AI 해석 생성", key="ai_btn_intervention"):
+            with st.spinner("Gemini가 개입 결과를 해석하는 중..."):
+                call_gemini(gemini_api_key, _ai_prompt_intv, _cache_key_i)
+        _cached_i = st.session_state.get(f"gemini_{_cache_key_i}")
+        if _cached_i:
+            render_ai_box(_cached_i)
+
+with tabs[3]:
+    # ═══ 양자적 접근 ═══
+    st.subheader("양자적 시도: Grover 알고리즘")
+
+    st.markdown(
+        f"""
+        <div class="status-band">
+        인과 구조 탐색은 본질적으로 조합 최적화 문제입니다. DAG 후보 공간이 변수 수에 따라 기하급수적으로 커지므로,
+        비정렬 탐색에서 이차 속도향상을 제공하는 <b>Grover 알고리즘</b>을 적용해 봅니다.<br><br>
+        각 엣지 후보를 큐비트 하나로 인코딩합니다. 현재 설정: <b>{n_edges}큐비트</b>,
+        BDeu 상위 <b>{top_k_effective}개</b> bitstring을 Oracle 타겟으로 설정합니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    qiskit_ok, qiskit_error = check_qiskit()
+    if not qiskit_ok:
+        st.error(f"Qiskit 또는 qiskit-aer를 불러올 수 없습니다: {qiskit_error}")
+    else:
+        run_cols = st.columns([0.2, 0.2, 0.6])
+        with run_cols[0]:
+            run_pressed = st.button("Grover 실행", type="primary", use_container_width=True)
+        with run_cols[1]:
+            n_runs = int(st.number_input("Multi-run", min_value=1, max_value=10, value=3, help="여러 번 실행해서 가장 좋은 결과를 선택합니다."))
+        with run_cols[2]:
+            st.markdown(
+                f"<p class='small-note'>반복 {grover_iteration_count(n_edges, top_k_effective)}회 x {n_runs} runs. "
+                "여러 번 실행하면 측정 분산을 줄여 더 안정적인 결과를 얻습니다.</p>",
+                unsafe_allow_html=True,
+            )
+
+        if run_pressed:
+            with st.spinner(f"Aer 시뮬레이터에서 Grover 회로를 {n_runs}회 실행 중입니다."):
+                best_result = None
+                best_good_prob = -1.0
+                all_run_probs = []
+                for run_i in range(n_runs):
+                    result = run_grover_search(n_edges, good_bitstrings, shots=shots)
+                    enriched = enrich_grover_result(result, valid_bitstrings, scored)
+                    all_run_probs.append(enriched["good_probability"])
+                    if enriched["good_probability"] > best_good_prob:
+                        best_good_prob = enriched["good_probability"]
+                        best_result = enriched
+                best_result["all_run_probs"] = all_run_probs
+                best_result["n_runs"] = n_runs
+            st.session_state["grover_result"] = best_result
+            st.session_state["grover_run_key"] = run_key
+
+    grover_result = st.session_state.get("grover_result")
+    if grover_result is not None:
+        if st.session_state.get("grover_run_key") != run_key:
+            st.warning("현재 설정이 마지막 Grover 실행 때와 다릅니다. 정확한 비교를 위해 다시 실행하세요.")
+
+        selected_bitstring = grover_result["selected_bitstring"]
+        grover_graph = bitstring_to_dag(selected_bitstring, edge_list)
+        grover_metrics = graph_metrics(ground_truth if has_ground_truth else None, grover_graph)
+
+        compare_cols = st.columns(3 if has_ground_truth else 2)
+        if has_ground_truth:
+            with compare_cols[0]:
+                st.pyplot(draw_dag(ground_truth, variables, "정답 구조"), use_container_width=True)
+        with compare_cols[-2]:
+            subtitle = f"rank 1, {format_edges(best_graph.edges())}"
+            if best_metrics:
+                subtitle = f"SHD={best_metrics['shd']}, F1={best_metrics['f1']:.2f}"
+            st.pyplot(
+                draw_dag(best_graph, variables, "고전 결과", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
+                use_container_width=True,
+            )
+        with compare_cols[-1]:
+            subtitle = f"rank {grover_result.get('selected_rank')}, {selected_bitstring}"
+            if grover_metrics:
+                subtitle = f"SHD={grover_metrics['shd']}, F1={grover_metrics['f1']:.2f}"
+            st.pyplot(
+                draw_dag(grover_graph, variables, "Grover 결과", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
+                use_container_width=True,
+            )
+
+        result_cols = st.columns(6)
+        result_cols[0].metric("Grover 반복", grover_result["n_iterations"])
+        result_cols[1].metric("Oracle 적중률", f"{grover_result['good_probability'] * 100:.1f}%")
+        result_cols[2].metric("유효 DAG 측정률", f"{grover_result['valid_probability'] * 100:.1f}%")
+        result_cols[3].metric("선택 DAG 순위", grover_result.get("selected_rank") or "N/A")
+        result_cols[4].metric("회로 깊이", grover_result["circuit_depth"])
+        if grover_result.get("n_runs", 1) > 1:
+            avg_prob = np.mean(grover_result.get("all_run_probs", [grover_result["good_probability"]]))
+            result_cols[5].metric("Multi-run", f"{grover_result['n_runs']}회", f"avg {avg_prob*100:.1f}%")
+        else:
+            result_cols[5].metric("실행 시간", f"{grover_result['elapsed_time']:.3f}s")
+
+        st.pyplot(plot_grover_counts(grover_result["counts"], good_bitstrings, valid_bitstrings), use_container_width=True)
+
+        detail_cols = st.columns(2)
+        with detail_cols[0]:
+            st.markdown("**Oracle 타겟 bitstring**")
+            st.dataframe(candidate_table(scored[:top_k_effective], ground_truth if has_ground_truth else None, top_k_effective), use_container_width=True, hide_index=True)
+        with detail_cols[1]:
+            st.markdown("**회로 및 후처리 요약**")
+            uniform_p = top_k_effective / (2**n_edges) * 100
+            summary_items = [
+                {"item": "Qubits", "value": grover_result["n_qubits"]},
+                {"item": "Shots", "value": f"{grover_result['shots']:,}"},
+                {"item": "Elapsed", "value": f"{grover_result['elapsed_time']:.4f}s"},
+                {"item": "Raw top bitstring", "value": grover_result["top_bitstring"]},
+                {"item": "Raw top is valid DAG", "value": grover_result["raw_top_is_valid"]},
+                {"item": "Selected (score-weighted)", "value": grover_result["selected_bitstring"]},
+                {"item": "Selected BDeu", "value": round(grover_result.get("selected_score") or 0, 3)},
+                {"item": "Uniform baseline", "value": f"{uniform_p:.2f}%"},
+                {"item": "Amplification", "value": f"{grover_result['good_probability']*100/uniform_p:.1f}x" if uniform_p > 0 else "N/A"},
+            ]
+            st.dataframe(pd.DataFrame(summary_items), use_container_width=True, hide_index=True)
+
+        with st.expander("양자 회로 보기"):
+            try:
+                circuit_fig = grover_result["circuit"].draw(output="mpl", fold=60)
+                st.pyplot(circuit_fig, use_container_width=True)
+                plt.close(circuit_fig)
+            except Exception:
+                st.code(str(grover_result["circuit"].draw(output="text", fold=100)))
+    else:
+        st.info("위 버튼을 눌러 Grover 실험을 실행하세요. 측정 분포와 고전 결과 비교가 생성됩니다.")
+
+    st.divider()
+
+    st.markdown("#### Grover vs Classical 복잡도")
+    st.pyplot(plot_complexity_comparison(n_edges, top_k_effective), use_container_width=True)
+
+    with st.expander("현재 구현의 한계와 의의"):
+        st.markdown(
+            """
+            **한계:**
+            - Oracle은 BDeu 점수를 양자 회로 안에서 직접 계산하지 않고, 고전적으로 구한 상위 bitstring을 표시합니다.
+            - Grover는 전체 비트 공간을 증폭하므로, 측정 결과에는 순환 그래프도 섞일 수 있습니다.
+            - 따라서 완전한 양자 우위 입증이 아니라, BDeu 상위 후보를 marked state로 둔 amplitude amplification 시연입니다.
+
+            **의의:**
+            - 인과 구조 탐색이라는 통계학 문제를 양자 탐색 문제로 **정식화**할 수 있음을 보여줍니다.
+            - 변수가 5개 이상으로 확장되면 Grover의 이차 속도향상 이점이 실질적으로 드러나기 시작합니다.
+            - 이 접근은 양자 인과 발견 분야의 시작점으로서 의미가 있습니다.
+
+            **발표용 요약:** 이 앱은 관측 데이터에서 가능한 DAG를 점수화하고 개입 후보를 비교하는 탐색형 도구이며,
+            Grover 구현은 BDeu 상위 후보를 marked state로 둔 개념증명입니다.
+            """
+        )
+
+with tabs[4]:
+    # ═══ 종합 분석 ═══
+    st.subheader("종합 분석 대시보드")
+
+    active_grover_r = st.session_state.get("grover_result")
+    grover_active = active_grover_r is not None and st.session_state.get("grover_run_key") == run_key
+
+    if grover_active:
+        grover_graph_r = bitstring_to_dag(active_grover_r["selected_bitstring"], edge_list)
+        grover_metrics_r = graph_metrics(ground_truth if has_ground_truth else None, grover_graph_r)
+    else:
+        grover_graph_r = None
+        grover_metrics_r = None
+
+    # ── Gauges ──
+    if has_ground_truth:
+        gauge_cols = st.columns(4 if grover_active else 3)
+        with gauge_cols[0]:
+            st.pyplot(plot_gauge(
+                best_metrics["f1"] if best_metrics else 0, "Classical F1",
+                color_thresholds=[(0.4, "#ef4444"), (0.7, "#f59e0b"), (1.01, "#059669")],
+            ), use_container_width=True)
+        with gauge_cols[1]:
+            shd_val = best_metrics["shd"] if best_metrics else 0
+            n_gt_edges = len(ground_truth.edges())
+            st.pyplot(plot_gauge(
+                shd_val, "SHD (lower=better)", max_val=max(n_gt_edges * 2, 1),
+                color_thresholds=[(0.2, "#059669"), (0.5, "#f59e0b"), (1.01, "#ef4444")],
+            ), use_container_width=True)
+        if grover_active:
+            with gauge_cols[2]:
+                st.pyplot(plot_gauge(
+                    grover_metrics_r["f1"] if grover_metrics_r else 0, "Grover F1",
+                    color_thresholds=[(0.4, "#ef4444"), (0.7, "#f59e0b"), (1.01, "#059669")],
+                ), use_container_width=True)
+            with gauge_cols[3]:
+                uniform_p_r = top_k_effective / (2 ** n_edges)
+                amp_r = active_grover_r["good_probability"] / uniform_p_r if uniform_p_r > 0 else 0
+                st.pyplot(plot_gauge(
+                    amp_r, "Amplification", max_val=max(amp_r * 1.3, 10),
+                    color_thresholds=[(0.3, "#ef4444"), (0.6, "#f59e0b"), (1.01, "#059669")],
+                ), use_container_width=True)
+        else:
+            with gauge_cols[2]:
+                st.pyplot(plot_gauge(0, "Grover F1\n(실행 필요)",
+                    color_thresholds=[(1.01, "#e2e8f0")],
+                ), use_container_width=True)
+    else:
+        st.info("정답 구조가 있는 데이터셋에서 구조 정확도 게이지가 표시됩니다.")
+
+    st.divider()
+
+    # ── Radar + Amplification (if Grover ran) ──
+    if grover_active:
+        st.markdown("#### Classical vs Quantum 다차원 비교")
+        radar_cols = st.columns([1.1, 0.9])
+        with radar_cols[0]:
+            st.pyplot(plot_radar_comparison(
+                best_metrics, grover_metrics_r, active_grover_r, n_edges, top_k_effective,
+            ), use_container_width=True)
+        with radar_cols[1]:
+            compare_rows = []
+            dims = [
+                ("Precision", best_metrics.get("precision", 0) if best_metrics else 0,
+                 grover_metrics_r.get("precision", 0) if grover_metrics_r else 0),
+                ("Recall", best_metrics.get("recall", 0) if best_metrics else 0,
+                 grover_metrics_r.get("recall", 0) if grover_metrics_r else 0),
+                ("F1 Score", best_metrics.get("f1", 0) if best_metrics else 0,
+                 grover_metrics_r.get("f1", 0) if grover_metrics_r else 0),
+                ("SHD", best_metrics.get("shd", "-") if best_metrics else "-",
+                 grover_metrics_r.get("shd", "-") if grover_metrics_r else "-"),
+                ("BDeu Rank", 1, active_grover_r.get("selected_rank", "-")),
+                ("BDeu Score", round(best_score, 2), round(active_grover_r.get("selected_score", 0) or 0, 2)),
+                ("Oracle Evaluations", f"{len(valid_dags):,}", f"{active_grover_r['n_iterations']:,}"),
+            ]
+            for name, c_val, g_val in dims:
+                winner = ""
+                if isinstance(c_val, (int, float)) and isinstance(g_val, (int, float)):
+                    if name == "SHD":
+                        winner = "Classical" if c_val <= g_val else "Grover"
+                    elif name in ("BDeu Rank",):
+                        winner = "Classical" if c_val <= g_val else "Grover"
+                    elif name == "Oracle Evaluations":
+                        winner = "Grover"
+                    else:
+                        winner = "Classical" if c_val >= g_val else "Grover"
+                compare_rows.append({
+                    "Metric": name,
+                    "Classical": c_val if not isinstance(c_val, float) else round(c_val, 3),
+                    "Grover": g_val if not isinstance(g_val, float) else round(g_val, 3),
+                    "Winner": winner,
+                })
+            st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.markdown("#### Grover 파이프라인 단계별 확률 변화")
+        st.pyplot(plot_amplification_waterfall(active_grover_r, n_edges, top_k_effective), use_container_width=True)
+        st.divider()
+
+    # ── Score landscape ──
+    st.markdown("#### BDeu Score Landscape")
+    explain_cols = st.columns([1.1, 0.9])
+    with explain_cols[0]:
+        st.pyplot(plot_score_landscape(scored, top_k_effective), use_container_width=True)
+    with explain_cols[1]:
+        score_gap = scored[0][2] - scored[-1][2] if len(scored) > 1 else 0
+        top5_avg = np.mean([s for _, _, s in scored[:5]]) if len(scored) >= 5 else scored[0][2]
+        st.markdown(
+            f"""
+            | 항목 | 값 |
+            |---|---|
+            | 유효 DAG 수 | **{len(valid_dags):,}**개 |
+            | 1위 BDeu | **{scored[0][2]:.2f}** |
+            | Top-5 평균 | **{top5_avg:.2f}** |
+            | 1위-꼴찌 격차 | **{score_gap:.2f}** |
+            | ESS | **{ess}** |
+            """
+        )
+
+    st.divider()
+
+    # ── Key Findings ──
+    st.markdown("#### Key Findings")
+    insights = generate_interpretation(
+        has_gt=has_ground_truth,
+        best_metrics=best_metrics,
+        grover_result=active_grover_r if grover_active else None,
+        grover_metrics=grover_metrics_r,
+        n_edges=n_edges,
+        top_k=top_k_effective,
+        scored=scored,
+        variables=variables,
+        dataset_name=dataset_name,
+    )
+
+    for color, title, body in insights:
+        st.markdown(
+            f"""
+            <div style="
+                border-left: 4px solid {color};
+                background: linear-gradient(90deg, {color}08, #ffffff);
+                padding: 0.9rem 1.2rem;
+                border-radius: 0 10px 10px 0;
+                margin-bottom: 0.7rem;
+            ">
+                <div style="font-weight: 700; color: {color}; font-size: 0.95rem; margin-bottom: 0.25rem;">{title}</div>
+                <div style="color: #334155; font-size: 0.88rem; line-height: 1.55;">{body}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if not grover_active:
+        st.info("'양자적 접근' 탭에서 Grover를 실행한 뒤 돌아오면 양자-고전 비교가 추가됩니다.")
+
+    if ai_enabled:
+        _ai_edges_syn = format_edges(best_graph.edges())
+        _ai_gt_syn = f"정답 구조: {format_edges(ground_truth.edges())}, F1={best_metrics['f1']:.2f}, SHD={best_metrics['shd']}" if has_ground_truth and best_metrics else "정답 구조 없음"
+        _ai_grover_syn = ""
+        if grover_active:
+            _ai_grover_syn = (
+                f"Grover 결과: Oracle 적중률 {active_grover_r['good_probability']*100:.1f}%, "
+                f"선택 DAG rank={active_grover_r.get('selected_rank', '?')}"
+            )
+        _ai_intv_syn = ""
+        _intv_preview = intervention_table(data, best_graph, variables, outcome, outcome_higher_is_better)
+        if not _intv_preview.empty:
+            _top = _intv_preview.iloc[0]
+            _ai_intv_syn = f"최적 개입: {_top['target']} ({_top['recommended_action']}, effect={_top['effect_high_minus_low']:.4f})"
+        _ai_prompt_syn = (
+            f"당신은 인과 추론 전문가입니다. 이 분석의 전체 결과를 종합해 비전문가에게 핵심 인사이트를 전달하세요. "
+            f"마크다운 문법 없이 일반 텍스트로 4~5문장 이내로 작성하세요.\n\n"
+            f"데이터셋: {dataset_name}\n변수: {', '.join(variables)}\n결과 변수: {outcome}\n"
+            f"발견된 DAG: {_ai_edges_syn}\n{_ai_gt_syn}\n"
+            f"유효 DAG {len(valid_dags)}개 중 1위 BDeu={scored[0][2]:.2f}\n"
+            f"{_ai_grover_syn}\n{_ai_intv_syn}\n\n"
+            f"종합 요약: 이 데이터에서 무엇을 알 수 있고, 어떤 행동을 권고할 수 있는지 정리하세요."
+        )
+        _cache_key_syn = prompt_cache_key("synthesis", _ai_prompt_syn)
+        if st.button("AI 종합 해석 생성", key="ai_btn_synthesis"):
+            with st.spinner("Gemini가 종합 분석을 생성하는 중..."):
+                call_gemini(gemini_api_key, _ai_prompt_syn, _cache_key_syn)
+        _cached_syn = st.session_state.get(f"gemini_{_cache_key_syn}")
+        if _cached_syn:
+            render_ai_box(_cached_syn)

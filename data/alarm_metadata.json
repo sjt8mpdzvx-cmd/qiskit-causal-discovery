@@ -1,0 +1,11 @@
+{
+  "name": "ALARM Network (ICU Patient Monitoring)",
+  "source_paper": "Beinlich et al. (1989) — The ALARM Monitoring System",
+  "description": "ICU 환자 모니터링 시스템. 37개 의학 변수. 인과 발견 대규모 벤치마크.",
+  "domain": "의학 / 중환자 모니터링",
+  "n_variables": 37,
+  "n_samples": 10000,
+  "n_edges": 46,
+  "csv_file": "alarm.csv",
+  "notes": "변수 수가 많아 3~4개 변수를 선택하여 분석해야 합니다."
+}

@@ -1,0 +1,34 @@
+{
+  "name": "Asia (Lung Cancer) Network",
+  "source_paper": "Lauritzen, S.L. & Spiegelhalter, D.J. (1988). Local Computations with Probabilities on Graphical Structures and Their Application to Expert Systems. Journal of the Royal Statistical Society B, 50(2), 157-224.",
+  "doi": "10.1111/j.2517-6161.1988.tb01721.x",
+  "description": "A small synthetic Bayesian network for diagnosing lung diseases. Models the relationship between smoking, lung cancer, tuberculosis, bronchitis, and diagnostic test results. Classic benchmark for causal discovery algorithms due to its small size and well-known structure.",
+  "domain": "Medical diagnosis / Pulmonology",
+  "data_type": "discrete (binary: yes/no)",
+  "n_variables": 8,
+  "n_samples": 10000,
+  "n_edges": 8,
+  "variables": [
+    {"name": "asia", "full_name": "Visit to Asia", "description": "Whether patient has recently visited Asia", "values": ["yes", "no"]},
+    {"name": "tub", "full_name": "Tuberculosis", "description": "Whether patient has tuberculosis", "values": ["yes", "no"]},
+    {"name": "smoke", "full_name": "Smoking", "description": "Whether patient is a smoker", "values": ["yes", "no"]},
+    {"name": "lung", "full_name": "Lung Cancer", "description": "Whether patient has lung cancer", "values": ["yes", "no"]},
+    {"name": "bronc", "full_name": "Bronchitis", "description": "Whether patient has bronchitis", "values": ["yes", "no"]},
+    {"name": "either", "full_name": "Either Tuberculosis or Lung Cancer", "description": "Whether patient has either tuberculosis or lung cancer (deterministic OR of tub and lung)", "values": ["yes", "no"]},
+    {"name": "xray", "full_name": "Chest X-Ray Result", "description": "Whether chest X-ray shows abnormality", "values": ["yes", "no"]},
+    {"name": "dysp", "full_name": "Dyspnoea", "description": "Whether patient experiences shortness of breath", "values": ["yes", "no"]}
+  ],
+  "ground_truth_edges": [
+    ["asia", "tub"],
+    ["smoke", "lung"],
+    ["smoke", "bronc"],
+    ["tub", "either"],
+    ["lung", "either"],
+    ["either", "xray"],
+    ["either", "dysp"],
+    ["bronc", "dysp"]
+  ],
+  "edge_format": "[source, target] indicating source -> target causal direction",
+  "csv_file": "asia.csv",
+  "notes": "Data generated synthetically from the known DAG structure and conditional probability tables as specified in the original paper. The 'either' node is a deterministic OR gate of 'tub' and 'lung'."
+}
