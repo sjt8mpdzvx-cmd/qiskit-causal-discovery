@@ -460,6 +460,16 @@ def draw_dag(
             bbox=dict(boxstyle="round,pad=0.3", fc="#f8fafc", ec="#e2e8f0", alpha=0.8)
         )
     
+    # 화살표 색상 범례
+    if reference is not None:
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor="#059669", label="정답 일치"),
+            Patch(facecolor="#ef4444", label="정답에 없음"),
+        ]
+        ax.legend(handles=legend_elements, loc="lower right", fontsize=8, framealpha=0.9,
+                  edgecolor="#e2e8f0", fancybox=True)
+
     ax.axis("off")
     ax.margins(0.15)
     fig.tight_layout()
