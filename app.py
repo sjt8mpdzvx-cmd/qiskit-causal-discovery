@@ -1348,21 +1348,25 @@ st.markdown(
         background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%);
         pointer-events: none;
     }
-    .hero-container h1.hero-title,
+    .hero-container .hero-title,
     .hero-title {
-        font-size: 1.85rem;
-        font-weight: 700;
+        display: block;
+        font-size: 1.85rem !important;
+        line-height: 1.22 !important;
+        font-weight: 800 !important;
         color: #f8fafc !important;
         margin: 0 0 0.3rem 0;
-        letter-spacing: -0.02em;
+        letter-spacing: 0;
         text-shadow: 0 2px 18px rgba(0,0,0,0.35);
     }
-    .hero-container p.hero-subtitle,
+    .hero-container .hero-subtitle,
     .hero-subtitle {
-        font-size: 0.95rem;
+        display: block;
+        font-size: 0.95rem !important;
         color: #dbeafe !important;
         margin: 0;
         line-height: 1.5;
+        max-width: 920px;
     }
     .hero-badge {
         display: inline-block;
@@ -1658,8 +1662,13 @@ st.markdown(
     f"""
     <div class="hero-container">
         <div class="hero-badge">Causal Inference + Qiskit</div>
-        <h1 class="hero-title">상관관계를 넘어서: 어디에 개입해야 하는가</h1>
-        <p class="hero-subtitle">관측 데이터에서 인과 구조(DAG)를 발견하고, 결과 변수를 바꾸기 위해 어떤 변수에 개입해야 하는지 추천합니다.<br>인과 구조 탐색에 Grover 알고리즘을 접목한 양자적 시도를 포함합니다.</p>
+        <div class="hero-title" style="color:#f8fafc !important;font-size:1.85rem;font-weight:800;line-height:1.22;text-shadow:0 2px 18px rgba(0,0,0,0.35);">
+            상관관계를 넘어서: 어디에 개입해야 하는가
+        </div>
+        <div class="hero-subtitle" style="color:#dbeafe !important;font-size:0.95rem;line-height:1.5;max-width:920px;">
+            관측 데이터에서 인과 구조(DAG)를 발견하고, 결과 변수를 바꾸기 위해 어떤 변수에 개입해야 하는지 추천합니다.<br>
+            인과 구조 탐색에 Grover 알고리즘을 접목한 양자적 시도를 포함합니다.
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
