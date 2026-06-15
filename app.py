@@ -1381,6 +1381,15 @@ st.markdown(
     .stAlert > div {
         border-radius: 10px;
         border: none;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+
+    /* ── Prevent horizontal overflow ── */
+    .block-container, .status-band, .hero-container {
+        overflow-x: hidden;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
     }
 
     /* ── Dataframe ── */
