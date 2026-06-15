@@ -444,27 +444,27 @@ def draw_dag(
     for u, v in G.edges():
         # 기본/정답/오답 색상 및 굵기
         color = "#6366f1"
-        width = 1.8
+        width = 1.6
         if reference is not None:
             if (u, v) in ref_edges:
                 color = "#059669"
-                width = 2.2
+                width = 2.0
             else:
                 color = "#ef4444"
-                width = 1.6
+                width = 1.5
 
-        # 미세한 곡선(rad=0.15)을 주어 일직선상의 겹침 방지
+        # 화살표 크기를 대폭 줄임 (mutation_scale=10, head_length=1.2)
         arrow = patches.FancyArrowPatch(
             pos[u], pos[v],
-            arrowstyle='-|>,head_length=6,head_width=3',
-            connectionstyle="arc3,rad=0.18", # 곡률을 주어 겹침 완전 해결
+            arrowstyle='-|>,head_length=1.5,head_width=0.8',
+            connectionstyle="arc3,rad=0.12", # 자연스러운 곡선
             color=color,
             linewidth=width,
-            mutation_scale=15,
-            shrinkA=22, # 노드 테두리에서 시작/종료
-            shrinkB=22,
+            mutation_scale=10, # 화살표 헤드 크기 결정
+            shrinkA=15, # 시작 지점 여백
+            shrinkB=15, # 끝 지점 여백
             zorder=1,
-            alpha=0.7
+            alpha=0.8
         )
         ax.add_patch(arrow)
 
