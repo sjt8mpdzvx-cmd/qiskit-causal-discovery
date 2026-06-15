@@ -2429,18 +2429,16 @@ with tabs[4]:
                 _ai_intv_syn = f"핵심 개입 타겟: {_top['target']} ({_top['recommended_action']}, 효과={_top['effect_high_minus_low']:.4f})"
 
         _ai_prompt_syn = (
-            f"당신은 인과 추론과 양자 컴퓨팅(Qiskit) 전문가입니다. 이 프로젝트의 전체 결과를 종합하여 최종 보고서를 작성하세요.\n\n"
-            f"### 분석 컨텍스트:\n"
-            f"- 데이터셋: {dataset_name}\n- 변수: {', '.join(variables)}\n- 결과 변수: {outcome}\n"
-            f"- 발견된 최적 DAG: {_ai_edges_syn}\n- {(_ai_gt_syn)}\n\n"
-            f"### 양자 컴퓨팅 결과 (Qiskit):\n"
-            f"- {_ai_grover_syn}\n- Grover 알고리즘이 비정렬 탐색 문제를 어떻게 해결했는지 요약하세요.\n\n"
-            f"### 결론 및 행동 제언:\n"
-            f"- {outcome}을 {'높이기' if outcome_higher_is_better else '낮추기'} 위한 전략 요약: {_ai_intv_syn}\n"
-            f"- 이 데이터 기반의 분석이 실제 의사결정에 어떻게 기여할 수 있는지 제언하세요.\n\n"
-            f"### Qiskit 수업 마무리 멘트:\n"
-            f"- 양자 알고리즘을 실무 문제(인과 추론)에 접목한 이 시도의 의의를 강조하세요.\n\n"
-            f"전문화된 보고서 형식으로 작성하고, 비전문가도 이해할 수 있도록 쉽게 풀어 설명하세요."
+            f"당신은 인과 추론과 양자 컴퓨팅(Qiskit) 전문가입니다. 이 프로젝트의 전체 결과를 종합하여 최종 분석 보고서를 작성하세요.\n\n"
+            f"### 보고서 구성 항목:\n"
+            f"1. **데이터 기반 인과 구조 분석**: {dataset_name} 데이터에서 발견된 최적의 인과 관계({_ai_edges_syn})가 도메인 관점에서 어떤 의미를 갖는지 설명\n"
+            f"2. **양자 알고리즘(Grover)의 역할**: Qiskit을 이용한 Grover 탐색이 인과 구조 탐색이라는 비정렬 탐색 문제에 어떻게 적용되었으며, {_ai_grover_syn} 결과가 갖는 방법론적 의미 설명\n"
+            f"3. **의사결정 제언**: {outcome}을 {'높이기' if outcome_higher_is_better else '낮추기'} 위해 {_ai_intv_syn} 조치가 필요한 이유와 기대 효과\n"
+            f"4. **기술적 의의와 향후 전망**: 인과 추론과 양자 알고리즘을 결합한 이 시도가 데이터 과학 분야에서 어떤 가능성을 제시하는지 정리\n\n"
+            f"### 참고 데이터:\n"
+            f"- 정답 구조 일치도: {(_ai_gt_syn)}\n- 분석 모델: Qiskit Aer Simulator (Grover Search)\n"
+            f"- 결과 변수 전략: {'증가' if outcome_higher_is_better else '감소'} 목표\n\n"
+            f"격식 있고 전문적인 리포트 문체(~입니다, ~함)를 사용하며, 전문 용어는 쉽게 풀어서 서술하세요."
         )
         _cache_key_syn = prompt_cache_key("synthesis", _ai_prompt_syn)
         _local_syn_summary = (
