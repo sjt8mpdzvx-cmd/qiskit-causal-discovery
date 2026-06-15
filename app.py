@@ -357,28 +357,19 @@ def score_from_csv_bytes(
 
 def known_layout(variables: list[str]) -> dict[str, tuple[float, float]] | None:
     protein_pos = {
-        "Raf": (0.0, 0.0), "Mek": (1.0, 0.0), "Erk": (2.0, 0.0), "Akt": (2.0, -1.0),
-        "PKA": (1.0, -1.0), "PKC": (0.0, 1.0),
+        "Raf": (0.0, 0.45), "Mek": (1.0, 0.45), "Erk": (2.0, 0.45), "Akt": (1.5, -0.35),
+        "PKA": (-0.2, -0.35), "PKC": (-0.2, 1.05),
     }
     sprinkler_pos = {
-        "Cloudy": (0.0, 1.0), "Sprinkler": (-1.0, 0.0), "Rain": (1.0, 0.0), "Wet_Grass": (0.0, -1.0),
+        "Cloudy": (0.0, 1.0), "Sprinkler": (-0.9, 0.1), "Rain": (0.9, 0.1), "Wet_Grass": (0.0, -0.75),
     }
     asia_pos = {
-        "asia": (-1.5, 1.0), "tub": (-1.5, 0.0), "smoke": (0.5, 1.0), "lung": (0.5, 0.0),
-        "bronc": (1.5, 0.0), "either": (-0.5, -1.0), "xray": (-1.5, -2.0), "dysp": (0.5, -2.0),
+        "asia": (-1.2, 1.0), "tub": (-1.2, 0.25), "smoke": (0.2, 1.0), "lung": (0.0, 0.25),
+        "bronc": (1.0, 0.25), "either": (-0.45, -0.45), "xray": (-1.0, -1.2), "dysp": (0.45, -1.2),
     }
-    # 학생 성적 및 자동차 연비 레이아웃 추가
-    student_pos = {
-        "GoOut": (0.0, 0.0), "StudyTime": (1.2, 0.6), "Absences": (1.2, -0.6), "FinalGrade": (2.4, 0.0),
-    }
-    mpg_pos = {
-        "Displacement": (0.0, 0.0), "Horsepower": (1.2, 0.6), "Weight": (1.2, -0.6), "MPG": (2.4, 0.0),
-    }
-    
-    for layout in (protein_pos, sprinkler_pos, asia_pos, student_pos, mpg_pos):
+    for layout in (protein_pos, sprinkler_pos, asia_pos):
         if all(var in layout for var in variables):
-            # 스케일 보정 (FancyArrowPatch와 호환되도록 간격을 키움)
-            return {var: (layout[var][0] * 3.0, layout[var][1] * 2.5) for var in variables}
+            return {var: layout[var] for var in variables}
     return None
 
 
@@ -389,86 +380,83 @@ def draw_dag(
     reference: nx.DiGraph | None = None,
     subtitle: str | None = None,
 ) -> plt.Figure:
-    fig, ax = plt.subplots(figsize=(9, 5.5))
+    fig, ax = plt.subplots(figsize=(7, 4.5))
     fig.patch.set_facecolor("#ffffff")
     
     G = graph.copy()
     G.add_nodes_from(variables)
     
-    # 1. 레이아웃 (고정 레이아웃 우선 적용)
+    # 1. 동적 레이아웃 (계층형 우선, 실패 시 스프링)
     pos = known_layout(variables)
     if pos is None:
-        try:
-            layers = list(nx.topological_generations(G))
-            pos = {}
-            for x, nodes in enumerate(layers):
-                nodes = sorted(nodes)
-                for y, node in enumerate(nodes):
-                    # 계층별 좌->우 배치 + 미세 지그재그
-                    pos[node] = (x * 3.5, -(y - (len(nodes)-1)/2.0) * 2.0 + (x % 2 * 0.3))
-        except:
-            pos = nx.spring_layout(G, k=2.5, seed=42)
+        if nx.is_directed_acyclic_graph(G) and len(G.edges()) > 0:
+            try:
+                layers = list(nx.topological_generations(G))
+                pos = {}
+                for x, nodes in enumerate(layers):
+                    nodes = sorted(nodes)
+                    for y, node in enumerate(nodes):
+                        pos[node] = (x * 2.0, -(y - (len(nodes)-1)/2.0))
+            except:
+                pos = nx.spring_layout(G, k=1.2, seed=42)
+        else:
+            # 엣지가 없거나 순환이 있으면 깔끔하게 원형/그리드 배치
+            pos = nx.circular_layout(G)
 
-    # 2. 노드 그리기 (긴 이름에 대비해 크기 최적화)
+    # 2. 노드 스타일
     node_colors = []
     for node in G.nodes():
         if G.out_degree(node) > 0 and G.in_degree(node) == 0:
-            node_colors.append("#eef2ff") # Source
+            node_colors.append("#eef2ff")
         elif G.out_degree(node) == 0:
-            node_colors.append("#fef3c7") # Sink
+            node_colors.append("#fef3c7")
         else:
-            node_colors.append("#f0fdf4") # Mid
+            node_colors.append("#f0fdf4")
 
     nx.draw_networkx_nodes(
         G, pos, ax=ax,
-        node_color=node_colors, node_size=3600, # 노드 크기 대폭 확대
-        edgecolors="#1e293b", linewidths=1.5, alpha=1.0
+        node_color=node_colors, node_size=1800,
+        edgecolors="#334155", linewidths=1.2
     )
     
     nx.draw_networkx_labels(
-        G, pos, ax=ax, font_size=10, font_weight="bold", font_color="#0f172a"
+        G, pos, ax=ax, font_size=9, font_weight="bold", font_color="#1e293b"
     )
 
-    # 3. 화살표 그리기 (곡선 유지하여 겹침 방지)
+    # 3. 화살표 스타일 (전문가용 크기 적용)
     import matplotlib.patches as patches
     ref_edges = set(reference.edges()) if reference is not None else set()
     
     for u, v in G.edges():
         color = "#6366f1"
-        width = 2.0
         if reference is not None:
-            if (u, v) in ref_edges:
-                color = "#059669"
-                width = 2.8
-            else:
-                color = "#ef4444"
-                width = 1.8
+            color = "#059669" if (u, v) in ref_edges else "#ef4444"
 
         arrow = patches.FancyArrowPatch(
             pos[u], pos[v],
-            arrowstyle='-|>,head_length=4.5,head_width=2.5',
-            connectionstyle="arc3,rad=0.15", # 곡률을 주어 엣지 분리
+            arrowstyle='-|>,head_length=4,head_width=2',
+            connectionstyle="arc3,rad=0.1",
             color=color,
-            linewidth=width,
-            mutation_scale=12,
-            shrinkA=28, # 노드 크기에 맞춰 정밀 조정
-            shrinkB=28,
+            linewidth=1.8,
+            mutation_scale=10,
+            shrinkA=18,
+            shrinkB=18,
             zorder=1,
-            alpha=0.75
+            alpha=0.8
         )
         ax.add_patch(arrow)
 
-    # 4. 축 범위 및 스타일링
-    ax.set_title(title, fontsize=14, fontweight="bold", pad=20)
+    # 4. 마무리
+    ax.set_title(title, fontsize=12, fontweight="bold", pad=15)
     if subtitle:
         ax.text(
-            0.5, -0.02, subtitle, transform=ax.transAxes,
-            ha="center", va="top", fontsize=9.5, color="#475569",
-            bbox=dict(boxstyle="round,pad=0.4", fc="#f8fafc", ec="#e2e8f0", alpha=0.9)
+            0.5, -0.05, subtitle, transform=ax.transAxes,
+            ha="center", va="top", fontsize=8.5, color="#64748b",
+            bbox=dict(boxstyle="round,pad=0.3", fc="#f8fafc", ec="#e2e8f0", alpha=0.8)
         )
     
     ax.axis("off")
-    ax.margins(0.25)
+    ax.margins(0.2)
     fig.tight_layout()
     return fig
 
@@ -509,13 +497,6 @@ def plot_correlation(data: pd.DataFrame) -> plt.Figure:
         for j in range(len(corr.columns)):
             value = corr.iloc[i, j]
             if np.isfinite(value):
-                text_color = "#ffffff" if abs(value) > 0.6 else "#334155"
-                ax.text(j, i, f"{value:.2f}", ha="center", va="center", fontsize=9.5, fontweight="bold", color=text_color)
-    ax.set_title("Correlation Matrix", fontsize=12, fontweight="bold", color="#0f172a")
-
-
-
-def plot_score_distribution(scored: list[tuple[str, nx.DiGraph, float]], good_bitstrings: list[str]) -> plt.Figure:
     scores = np.array([item[2] for item in scored])
     fig, ax = plt.subplots(figsize=(6.2, 3.8))
     fig.patch.set_facecolor("#ffffff")
