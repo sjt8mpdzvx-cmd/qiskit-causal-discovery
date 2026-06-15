@@ -393,90 +393,92 @@ def draw_dag(
     reference: nx.DiGraph | None = None,
     subtitle: str | None = None,
 ) -> plt.Figure:
-    # 가로로 긴 캔버스 확보 (노드 간격 확보용)
-    fig, ax = plt.subplots(figsize=(8.5, 4.5))
+    fig, ax = plt.subplots(figsize=(8, 4.5))
     fig.patch.set_facecolor("#ffffff")
     
     G = graph.copy()
     G.add_nodes_from(variables)
     
-    # 1. 고정된 계층 레이아웃 (좌 -> 우 흐름)
+    # 1. 지그재그 계층 레이아웃 (엣지 겹침 방지)
     try:
         layers = list(nx.topological_generations(G))
         pos = {}
         for x, nodes in enumerate(layers):
             nodes = sorted(nodes)
             for y, node in enumerate(nodes):
-                # 가로 간격을 매우 넓게 (x*3.0), 세로 간격도 확보 (y*1.5)
-                pos[node] = (x * 3.0, -(y - (len(nodes)-1)/2.0) * 1.5)
+                # x축 간격은 넓게, y축은 중앙 정렬 + 미세한 지그재그(x%2 * 0.2)
+                y_coord = -(y - (len(nodes)-1)/2.0) * 1.5
+                y_jitter = 0.2 if x % 2 == 0 else -0.2
+                pos[node] = (x * 2.5, y_coord + y_jitter)
     except:
-        pos = nx.spring_layout(G, k=2, seed=42)
+        pos = nx.spring_layout(G, k=1.5, seed=42)
 
-    # 엣지 없는 노드는 왼쪽 하단에 별도로 배치
     missing = [n for n in variables if n not in pos]
     for i, n in enumerate(missing):
-        pos[n] = (-2.0, -(i - (len(missing)-1)/2.0) * 1.5)
+        pos[n] = (-1.5, -(i - (len(missing)-1)/2.0) * 1.5)
 
     # 2. 노드 그리기
     node_colors = []
     for node in G.nodes():
         if G.out_degree(node) > 0 and G.in_degree(node) == 0:
-            node_colors.append("#e0e7ff") # 원인
+            node_colors.append("#eef2ff") # Source
         elif G.out_degree(node) == 0:
-            node_colors.append("#fef3c7") # 결과
+            node_colors.append("#fef3c7") # Sink
         else:
-            node_colors.append("#f0fdf4") # 중간
+            node_colors.append("#f0fdf4") # Mid
 
     nx.draw_networkx_nodes(
         G, pos, ax=ax,
-        node_color=node_colors, node_size=2800, # 노드 크기 키움
-        edgecolors="#1e293b", linewidths=1.5, alpha=1.0
+        node_color=node_colors, node_size=2200,
+        edgecolors="#334155", linewidths=1.2, alpha=1.0
     )
     
     nx.draw_networkx_labels(
-        G, pos, ax=ax, font_size=11, font_weight="bold", font_color="#0f172a"
+        G, pos, ax=ax, font_size=10, font_weight="bold", font_color="#1e293b"
     )
 
-    # 3. 화살표 그리기
+    # 3. 곡선 화살표 그리기 (FancyArrowPatch)
+    import matplotlib.patches as patches
     ref_edges = set(reference.edges()) if reference is not None else set()
+    
     for u, v in G.edges():
+        # 기본/정답/오답 색상 및 굵기
         color = "#6366f1"
-        width = 2.5
+        width = 1.8
         if reference is not None:
             if (u, v) in ref_edges:
                 color = "#059669"
-                width = 3.0
+                width = 2.2
             else:
                 color = "#ef4444"
-                width = 2.0
-            
-        ax.annotate(
-            "",
-            xy=pos[v], xytext=pos[u],
-            arrowprops=dict(
-                arrowstyle="-|>,head_length=0.8,head_width=0.4",
-                color=color,
-                lw=width,
-                shrinkA=28, # 노드 크기에 맞춰 조절
-                shrinkB=28,
-                connectionstyle="arc3,rad=0", # 무조건 직선
-                alpha=0.8,
-                ls='-'
-            )
-        )
+                width = 1.6
 
-    # 4. 마무리 스타일링
-    ax.set_title(title, fontsize=14, fontweight="bold", pad=20)
+        # 미세한 곡선(rad=0.15)을 주어 일직선상의 겹침 방지
+        arrow = patches.FancyArrowPatch(
+            pos[u], pos[v],
+            arrowstyle='-|>,head_length=6,head_width=3',
+            connectionstyle="arc3,rad=0.18", # 곡률을 주어 겹침 완전 해결
+            color=color,
+            linewidth=width,
+            mutation_scale=15,
+            shrinkA=22, # 노드 테두리에서 시작/종료
+            shrinkB=22,
+            zorder=1,
+            alpha=0.7
+        )
+        ax.add_patch(arrow)
+
+    # 4. 축 범위 및 제목
+    ax.set_title(title, fontsize=13, fontweight="bold", pad=15)
     if subtitle:
         ax.text(
-            0.5, -0.05, subtitle, transform=ax.transAxes,
-            ha="center", va="top", fontsize=10, color="#475569",
-            bbox=dict(boxstyle="round,pad=0.5", fc="#f8fafc", ec="#e2e8f0", alpha=0.9)
+            0.5, -0.02, subtitle, transform=ax.transAxes,
+            ha="center", va="top", fontsize=9, color="#475569",
+            bbox=dict(boxstyle="round,pad=0.3", fc="#f8fafc", ec="#e2e8f0", alpha=0.8)
         )
     
     ax.axis("off")
-    # 여백 자동 조정 (노드 잘림 방지)
-    ax.margins(0.2)
+    ax.margins(0.15)
     fig.tight_layout()
     return fig
 
