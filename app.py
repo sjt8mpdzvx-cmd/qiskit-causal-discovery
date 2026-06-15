@@ -393,34 +393,35 @@ def draw_dag(
     reference: nx.DiGraph | None = None,
     subtitle: str | None = None,
 ) -> plt.Figure:
-    fig, ax = plt.subplots(figsize=(6, 4))
+    # 가로로 긴 캔버스 확보 (노드 간격 확보용)
+    fig, ax = plt.subplots(figsize=(8.5, 4.5))
     fig.patch.set_facecolor("#ffffff")
     
-    # 노드 및 엣지 준비
     G = graph.copy()
     G.add_nodes_from(variables)
     
-    # 1. 레이아웃: 좌->우 흐름을 보장하는 수동 계층 배치
-    pos = known_layout(variables)
-    if pos is None:
-        try:
-            # 인과 방향에 따른 계층 정렬
-            layers = list(nx.topological_generations(G))
-            pos = {}
-            for x, nodes in enumerate(layers):
-                nodes = sorted(nodes)
-                for y, node in enumerate(nodes):
-                    # x축은 넓게, y축은 중앙 정렬
-                    pos[node] = (x * 2.0, -(y - (len(nodes)-1)/2.0))
-        except:
-            # 순환이 있을 경우 원형 배치
-            pos = nx.circular_layout(G)
+    # 1. 고정된 계층 레이아웃 (좌 -> 우 흐름)
+    try:
+        layers = list(nx.topological_generations(G))
+        pos = {}
+        for x, nodes in enumerate(layers):
+            nodes = sorted(nodes)
+            for y, node in enumerate(nodes):
+                # 가로 간격을 매우 넓게 (x*3.0), 세로 간격도 확보 (y*1.5)
+                pos[node] = (x * 3.0, -(y - (len(nodes)-1)/2.0) * 1.5)
+    except:
+        pos = nx.spring_layout(G, k=2, seed=42)
 
-    # 2. 노드 그리기 (색상: 인디고/앰버/그린)
+    # 엣지 없는 노드는 왼쪽 하단에 별도로 배치
+    missing = [n for n in variables if n not in pos]
+    for i, n in enumerate(missing):
+        pos[n] = (-2.0, -(i - (len(missing)-1)/2.0) * 1.5)
+
+    # 2. 노드 그리기
     node_colors = []
     for node in G.nodes():
         if G.out_degree(node) > 0 and G.in_degree(node) == 0:
-            node_colors.append("#eef2ff") # 원인
+            node_colors.append("#e0e7ff") # 원인
         elif G.out_degree(node) == 0:
             node_colors.append("#fef3c7") # 결과
         else:
@@ -428,52 +429,54 @@ def draw_dag(
 
     nx.draw_networkx_nodes(
         G, pos, ax=ax,
-        node_color=node_colors, node_size=1600,
-        edgecolors="#334155", linewidths=1.2
+        node_color=node_colors, node_size=2800, # 노드 크기 키움
+        edgecolors="#1e293b", linewidths=1.5, alpha=1.0
     )
     
     nx.draw_networkx_labels(
-        G, pos, ax=ax, font_size=9, font_weight="bold", font_color="#1e293b"
+        G, pos, ax=ax, font_size=11, font_weight="bold", font_color="#0f172a"
     )
 
-    # 3. 직선 화살표 그리기
+    # 3. 화살표 그리기
     ref_edges = set(reference.edges()) if reference is not None else set()
     for u, v in G.edges():
-        # 기본: 인디고, 정답: 그린, 오답: 레드
-        edge_color = "#6366f1"
+        color = "#6366f1"
+        width = 2.5
         if reference is not None:
-            edge_color = "#059669" if (u, v) in ref_edges else "#ef4444"
+            if (u, v) in ref_edges:
+                color = "#059669"
+                width = 3.0
+            else:
+                color = "#ef4444"
+                width = 2.0
             
         ax.annotate(
             "",
             xy=pos[v], xytext=pos[u],
             arrowprops=dict(
-                arrowstyle="-|>,head_length=0.6,head_width=0.3",
-                color=edge_color,
-                lw=1.8,
-                shrinkA=20, # 노드에서 시작 지점 띄움
-                shrinkB=20, # 노드에서 끝 지점 띄움
+                arrowstyle="-|>,head_length=0.8,head_width=0.4",
+                color=color,
+                lw=width,
+                shrinkA=28, # 노드 크기에 맞춰 조절
+                shrinkB=28,
                 connectionstyle="arc3,rad=0", # 무조건 직선
-                alpha=0.8
+                alpha=0.8,
+                ls='-'
             )
         )
 
-    # 4. 여백 및 제목
-    ax.set_title(title, fontsize=12, fontweight="bold", pad=10, color="#0f172a")
+    # 4. 마무리 스타일링
+    ax.set_title(title, fontsize=14, fontweight="bold", pad=20)
     if subtitle:
         ax.text(
             0.5, -0.05, subtitle, transform=ax.transAxes,
-            ha="center", va="top", fontsize=8.5, color="#64748b",
-            bbox=dict(boxstyle="round,pad=0.3", fc="#f8fafc", ec="#e2e8f0", alpha=0.8)
+            ha="center", va="top", fontsize=10, color="#475569",
+            bbox=dict(boxstyle="round,pad=0.5", fc="#f8fafc", ec="#e2e8f0", alpha=0.9)
         )
     
     ax.axis("off")
-    # 여백을 넉넉히 주어 노드가 잘리는 것 방지
-    x_coords = [p[0] for p in pos.values()]
-    y_coords = [p[1] for p in pos.values()]
-    ax.set_xlim(min(x_coords) - 0.8, max(x_coords) + 0.8)
-    ax.set_ylim(min(y_coords) - 0.8, max(y_coords) + 0.8)
-    
+    # 여백 자동 조정 (노드 잘림 방지)
+    ax.margins(0.2)
     fig.tight_layout()
     return fig
 
