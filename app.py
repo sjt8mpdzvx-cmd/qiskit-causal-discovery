@@ -1666,27 +1666,6 @@ st.markdown(
 )
 
 st.markdown(f"<div class='status-band'>{story}</div>", unsafe_allow_html=True)
-if data_mode == "내장 데이터셋":
-    if dataset_name == "Sprinkler weather":
-        st.markdown(
-            """
-            <div class="status-band" style="border-left-color:#059669;background:linear-gradient(90deg,#ecfdf5 0%,#f8fafc 100%);">
-            <b>발표 추천 설정</b>: Sprinkler weather는 구조가 직관적이고 변수 4개로 Grover 시연도 안정적입니다.
-            상관관계와 인과관계의 차이, DAG 발견, 개입 추천을 5분 안에 설명하기 가장 좋습니다.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            """
-            <p class="small-note">
-            발표용 안정 시연은 <b>Sprinkler weather</b>를 추천합니다. 현재 데이터셋은 도메인 스토리 설명에는 좋지만,
-            관측 데이터 기반 구조학습 특성상 정답 F1이 낮을 수 있습니다.
-            </p>
-            """,
-            unsafe_allow_html=True,
-        )
 
 # Compute intervention for top metric display
 _preview_intervention = intervention_table(data, best_graph, variables, outcome, outcome_higher_is_better)
