@@ -724,7 +724,7 @@ def compact_groq_error(errors: list[str] | str) -> str:
             "Groq 콘솔에서 모델 권한을 확인하세요."
         )
     if "401" in text or "403" in text or "api key" in lowered or "permission" in lowered or "unauthorized" in lowered:
-        return "AI 해석 생성 실패: Groq API key 권한 또는 인증 설정을 확인하세요."
+        return f"AI 해석 생성 실패: {text}"
     return f"AI 해석 생성 실패: {text}"
 
 
