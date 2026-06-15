@@ -765,7 +765,7 @@ def call_groq(api_key: str, prompt: str, cache_key: str, fallback: str | None = 
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.2,
-        "max_completion_tokens": 700,
+        "max_completion_tokens": 1500,
     }
     try:
         request = urllib.request.Request(
