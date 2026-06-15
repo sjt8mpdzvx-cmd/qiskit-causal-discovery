@@ -10,11 +10,14 @@ from __future__ import annotations
 import hashlib
 import html
 import io
+import json
 import math
 import os
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import warnings
 from dataclasses import dataclass
 from typing import Iterable
@@ -264,20 +267,75 @@ def load_csv(file_name: str) -> pd.DataFrame:
     return pd.read_csv(os.path.join(DATA_DIR, file_name))
 
 
+def read_csv_bytes(csv_bytes: bytes) -> pd.DataFrame:
+    """Read uploaded CSV bytes with user-facing validation errors."""
+    if not csv_bytes:
+        raise ValueError("CSV 파일이 비어 있습니다.")
+    try:
+        raw = pd.read_csv(io.BytesIO(csv_bytes))
+    except UnicodeDecodeError:
+        try:
+            raw = pd.read_csv(io.BytesIO(csv_bytes), encoding="cp949")
+        except Exception as exc:
+            raise ValueError(f"CSV 인코딩을 읽을 수 없습니다: {exc}") from exc
+    except pd.errors.EmptyDataError as exc:
+        raise ValueError("CSV 파일이 비어 있습니다.") from exc
+    except pd.errors.ParserError as exc:
+        raise ValueError(f"CSV 형식을 파싱할 수 없습니다: {exc}") from exc
+    except Exception as exc:
+        raise ValueError(f"CSV를 읽을 수 없습니다: {exc}") from exc
+
+    raw.columns = [str(col).strip() for col in raw.columns]
+    if raw.empty:
+        raise ValueError("CSV에 데이터 행이 없습니다.")
+    if len(raw.columns) < 2:
+        raise ValueError("CSV에는 최소 2개 이상의 열이 필요합니다.")
+    if any(col == "" for col in raw.columns):
+        raise ValueError("빈 컬럼명이 있습니다. CSV 헤더를 확인하세요.")
+    duplicated = raw.columns[raw.columns.duplicated()].tolist()
+    if duplicated:
+        raise ValueError(f"중복 컬럼명이 있습니다: {', '.join(map(str, duplicated))}")
+    return raw
+
+
+def validate_selected_variables(raw: pd.DataFrame, variables: list[str]) -> None:
+    if len(variables) < 2:
+        raise ValueError("분석하려면 변수를 2개 이상 선택해야 합니다.")
+    if len(variables) > 4:
+        raise ValueError("현재 Grover 시뮬레이션은 변수 4개까지 안정적으로 지원합니다.")
+    missing = [var for var in variables if var not in raw.columns]
+    if missing:
+        raise ValueError(f"CSV에 없는 변수가 선택되었습니다: {', '.join(missing)}")
+
+
 def discretize_for_bdeu(raw: pd.DataFrame, variables: list[str], auto_discretize: bool) -> pd.DataFrame:
+    validate_selected_variables(raw, variables)
     data = raw[variables].copy()
+    data = data.replace([np.inf, -np.inf], np.nan)
+    data = data.dropna(subset=variables)
+    if len(data) < 5:
+        raise ValueError("선택한 변수들에서 결측/무한값을 제거한 뒤 분석 가능한 행이 5개 미만입니다.")
+
     for col in variables:
         series = data[col]
         if pd.api.types.is_numeric_dtype(series):
             unique_count = series.nunique(dropna=True)
+            if unique_count == 0:
+                raise ValueError(f"{col} 변수에 분석 가능한 값이 없습니다.")
             if auto_discretize and unique_count > 8:
                 ranked = series.rank(method="first")
                 data[col] = pd.qcut(ranked, q=3, labels=False, duplicates="drop")
             else:
                 data[col] = series
         else:
-            data[col] = series.astype("category").cat.codes
-    return data.dropna().reset_index(drop=True)
+            data[col] = series.astype("string").astype("category").cat.codes
+
+    data = data.dropna().reset_index(drop=True)
+    if data.empty:
+        raise ValueError("전처리 후 남은 데이터가 없습니다.")
+    if all(data[col].nunique(dropna=True) < 2 for col in variables):
+        raise ValueError("선택한 모든 변수가 상수입니다. 변동이 있는 변수를 선택하세요.")
+    return data
 
 
 @st.cache_data(show_spinner=False)
@@ -287,7 +345,7 @@ def score_from_csv_bytes(
     ess: int,
     auto_discretize: bool,
 ) -> tuple[pd.DataFrame, list[tuple[str, nx.DiGraph]], list[tuple[str, str]], list[tuple[str, nx.DiGraph, float]], float]:
-    raw = pd.read_csv(io.BytesIO(csv_bytes))
+    raw = read_csv_bytes(csv_bytes)
     variables = list(variables_tuple)
     data = discretize_for_bdeu(raw, variables, auto_discretize)
     start = time.time()
@@ -647,55 +705,93 @@ def prompt_cache_key(prefix: str, prompt: str) -> str:
     return f"{prefix}_{digest}"
 
 
-def compact_gemini_error(errors: list[str] | str) -> str:
+GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+
+def compact_groq_error(errors: list[str] | str) -> str:
     """Convert verbose provider errors into an actionable short message."""
     text = " | ".join(errors) if isinstance(errors, list) else str(errors)
-    if "429" in text or "quota" in text.lower() or "Quota exceeded" in text:
+    lowered = text.lower()
+    if "429" in text or "rate limit" in lowered or "quota" in lowered:
         return (
-            "AI 해석 생성 실패: Gemini API 할당량이 초과되었거나 현재 API key의 무료 할당량이 0입니다. "
-            "Google AI Studio에서 다른 API key를 만들거나, 해당 Google Cloud 프로젝트의 billing/quota 설정을 확인하세요."
+            "AI 해석 생성 실패: Groq API 사용량 제한에 걸렸습니다. "
+            "잠시 뒤 다시 시도하거나 Groq 콘솔의 rate limit/프로젝트 설정을 확인하세요."
         )
-    if "404" in text and "not found" in text.lower():
+    if "404" in text and ("not found" in lowered or "model" in lowered):
         return (
-            "AI 해석 생성 실패: 현재 API key/API 버전에서 요청한 Gemini 모델을 사용할 수 없습니다. "
-            "Google AI Studio에서 사용 가능한 모델이 연결된 API key인지 확인하세요."
+            "AI 해석 생성 실패: 현재 Groq API key에서 요청한 모델을 사용할 수 없습니다. "
+            "Groq 콘솔에서 모델 권한을 확인하세요."
         )
-    if "API key" in text or "permission" in text.lower() or "403" in text:
-        return "AI 해석 생성 실패: Gemini API key 권한 또는 인증 설정을 확인하세요."
+    if "401" in text or "403" in text or "api key" in lowered or "permission" in lowered or "unauthorized" in lowered:
+        return "AI 해석 생성 실패: Groq API key 권한 또는 인증 설정을 확인하세요."
     return f"AI 해석 생성 실패: {text}"
 
 
 def append_local_fallback(message: str, fallback: str | None) -> str:
     if not fallback:
         return message
-    return f"{message}\n\nGemini 없이 표시하는 로컬 요약:\n{fallback}"
+    return f"{message}\n\nGroq 없이 표시하는 로컬 요약:\n{fallback}"
 
 
-def call_gemini(api_key: str, prompt: str, cache_key: str, fallback: str | None = None) -> str:
-    """Gemini API를 호출해 자연어 해석을 생성한다. session_state에 캐싱."""
-    state_key = f"gemini_{cache_key}"
+def groq_error_message(http_error: urllib.error.HTTPError) -> str:
+    body = http_error.read().decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(body)
+        detail = parsed.get("error", {})
+        if isinstance(detail, dict) and detail.get("message"):
+            return f"{http_error.code} {detail['message']}"
+    except Exception:
+        pass
+    return f"{http_error.code} {body.strip() or http_error.reason}"
+
+
+def call_groq(api_key: str, prompt: str, cache_key: str, fallback: str | None = None) -> str:
+    """Call Groq Chat Completions and cache the generated interpretation."""
+    state_key = f"groq_{cache_key}"
     if state_key in st.session_state:
         return st.session_state[state_key]
-    model_candidates = ["gemini-2.0-flash"]
+
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a careful Korean causal inference assistant. "
+                    "Explain only what the provided DAG, BDeu score, and intervention table support."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "max_completion_tokens": 700,
+    }
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        errors = []
-        for model_name in model_candidates:
-            try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(prompt)
-                result = getattr(response, "text", "")
-                if result and result.strip():
-                    result = result.strip()
-                    st.session_state[state_key] = result
-                    return result
-                errors.append(f"{model_name}: empty response")
-            except Exception as model_exc:
-                errors.append(f"{model_name}: {model_exc}")
-        result = compact_gemini_error(errors)
+        request = urllib.request.Request(
+            GROQ_CHAT_COMPLETIONS_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=45) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        result = data["choices"][0]["message"]["content"].strip()
+        if result:
+            st.session_state[state_key] = result
+            return result
+        result = "AI 해석 생성 실패: Groq 응답이 비어 있습니다."
+    except urllib.error.HTTPError as exc:
+        result = compact_groq_error(groq_error_message(exc))
+    except urllib.error.URLError as exc:
+        result = compact_groq_error(f"network error: {exc.reason}")
+    except TimeoutError:
+        result = compact_groq_error("network timeout")
     except Exception as exc:
-        result = compact_gemini_error(str(exc))
+        result = compact_groq_error(str(exc))
     result = append_local_fallback(result, fallback)
     st.session_state[state_key] = result
     return result
@@ -707,7 +803,7 @@ def render_ai_box(content: str):
     box_bg = "#fef2f2" if is_error else "linear-gradient(135deg, #eef2ff 0%, #f0fdf4 100%)"
     box_border = "#fecaca" if is_error else "#c7d2fe"
     title_color = "#b91c1c" if is_error else "#6366f1"
-    title = "AI Interpretation Error" if is_error else "AI Interpretation (Gemini)"
+    title = "AI Interpretation Error" if is_error else "AI Interpretation (Groq)"
     safe_content = html.escape(content).replace("\n", "<br>")
     st.markdown(
         f"""
@@ -829,6 +925,10 @@ def intervention_table(
     if table.empty:
         return table
     return table.sort_values("effect_high_minus_low", key=lambda col: col.abs(), ascending=False).reset_index(drop=True)
+
+
+def has_actionable_intervention(table: pd.DataFrame, eps: float = 1e-9) -> bool:
+    return not table.empty and float(table["effect_high_minus_low"].abs().max()) > eps
 
 
 def plot_interventions(table: pd.DataFrame) -> plt.Figure:
@@ -1565,7 +1665,7 @@ else:
             <div class="upload-empty-state">
             <b>CSV 파일을 기다리는 중입니다.</b><br>
             왼쪽 사이드바의 업로드 영역에서 CSV 파일을 선택하세요.
-            파일을 업로드하면 분석 변수, 결과 변수, BDeu 점수 계산, 개입 추천, Gemini 해석 기능이 표시됩니다.<br>
+            파일을 업로드하면 분석 변수, 결과 변수, BDeu 점수 계산, 개입 추천, Groq 해석 기능이 표시됩니다.<br>
             바로 시연하려면 데이터 소스를 <b>내장 데이터셋</b>으로 바꾸고 <b>Sprinkler weather</b>를 선택하세요.
             </div>
             """,
@@ -1573,7 +1673,11 @@ else:
         )
         st.stop()
     uploaded_bytes = uploaded.getvalue()
-    raw_df = pd.read_csv(io.BytesIO(uploaded_bytes))
+    try:
+        raw_df = read_csv_bytes(uploaded_bytes)
+    except ValueError as exc:
+        st.error(str(exc))
+        st.stop()
     selected_vars = st.sidebar.multiselect(
         "분석 변수",
         list(raw_df.columns),
@@ -1628,22 +1732,35 @@ else:
 
 st.sidebar.divider()
 st.sidebar.markdown("**AI 해석 (선택)**")
-gemini_api_key = st.sidebar.text_input(
-    "Gemini API Key",
+groq_api_key = st.sidebar.text_input(
+    "Groq API Key",
     type="password",
-    help="Google AI Studio에서 발급받은 API 키를 입력하면 분석 결과를 AI가 자연어로 해석해 줍니다. 없어도 앱의 모든 기능을 사용할 수 있습니다.",
+    help="Groq 콘솔에서 발급받은 API 키를 입력하면 분석 결과를 AI가 자연어로 해석해 줍니다. 없어도 앱의 모든 기능을 사용할 수 있습니다.",
 )
-ai_enabled = bool(gemini_api_key)
+ai_enabled = bool(groq_api_key)
 
 csv_bytes = uploaded_bytes if uploaded_bytes is not None else raw_df.to_csv(index=False).encode("utf-8")
 
 with st.spinner("DAG 후보를 열거하고 BDeu 점수를 계산하는 중입니다."):
-    data, valid_dags, edge_list, scored, scoring_elapsed = score_from_csv_bytes(
-        csv_bytes,
-        tuple(variables),
-        ess,
-        auto_discretize,
-    )
+    try:
+        data, valid_dags, edge_list, scored, scoring_elapsed = score_from_csv_bytes(
+            csv_bytes,
+            tuple(variables),
+            ess,
+            auto_discretize,
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        st.stop()
+    except Exception as exc:
+        st.error(f"분석 계산 중 오류가 발생했습니다: {exc}")
+        st.stop()
+
+if len(data) != len(raw_df):
+    st.sidebar.caption(f"전처리 후 분석 행: {len(data):,} / 원본 {len(raw_df):,}")
+low_information_cols = [col for col in variables if data[col].nunique(dropna=True) < 2]
+if low_information_cols:
+    st.sidebar.warning(f"변동이 없는 변수는 구조 식별력이 낮습니다: {', '.join(low_information_cols)}")
 
 ground_truth = build_ground_truth(variables, ground_truth_edges)
 has_ground_truth = len(ground_truth.edges()) > 0
@@ -1678,8 +1795,12 @@ st.markdown(f"<div class='status-band'>{story}</div>", unsafe_allow_html=True)
 
 # Compute intervention for top metric display
 _preview_intervention = intervention_table(data, best_graph, variables, outcome, outcome_higher_is_better)
-_top_target = _preview_intervention.iloc[0]["target"] if not _preview_intervention.empty else "-"
-_top_action = _preview_intervention.iloc[0]["recommended_action"] if not _preview_intervention.empty else "-"
+if has_actionable_intervention(_preview_intervention):
+    _top_target = _preview_intervention.iloc[0]["target"]
+    _top_action = _preview_intervention.iloc[0]["recommended_action"]
+else:
+    _top_target = "-"
+    _top_action = "추천 가능한 개입 없음"
 
 metric_cols = st.columns(5)
 metric_cols[0].metric("분석 변수", f"{len(variables)}개", ", ".join(variables))
@@ -1846,9 +1967,9 @@ with tabs[1]:
             "이 결과는 가능한 DAG 후보 중 데이터에 가장 잘 맞는 탐색 결과로 해석해야 합니다."
         )
         if st.button("AI 해석 생성", key="ai_btn_structure"):
-            with st.spinner("Gemini가 구조를 해석하는 중..."):
-                call_gemini(gemini_api_key, _ai_prompt_structure, _cache_key_s, _local_structure_summary)
-        _cached_s = st.session_state.get(f"gemini_{_cache_key_s}")
+            with st.spinner("Groq가 구조를 해석하는 중..."):
+                call_groq(groq_api_key, _ai_prompt_structure, _cache_key_s, _local_structure_summary)
+        _cached_s = st.session_state.get(f"groq_{_cache_key_s}")
         if _cached_s:
             render_ai_box(_cached_s)
 
@@ -1897,31 +2018,52 @@ with tabs[2]:
     if not intervention.empty:
         best_intv = intervention.iloc[0]
         effect_val = best_intv["effect_high_minus_low"]
-        direction_icon = "+" if effect_val > 0 else "-" if effect_val < 0 else "="
-        confidence_label, confidence_bg, confidence_fg = coverage_confidence(float(best_intv["coverage"]))
-        st.markdown(
-            f"""
-            <div style="
-                background: linear-gradient(135deg, #059669 0%, #047857 100%);
-                border-radius: 12px;
-                padding: 1.3rem 1.5rem;
-                margin: 1rem 0;
-                color: #ffffff;
-            ">
-                <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85; margin-bottom: 0.3rem;">추천 개입 타겟</div>
-                <div style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.2rem;">{best_intv['target']} ({direction_icon}{abs(effect_val):.4f})</div>
-                <div style="font-size: 0.95rem; opacity: 0.9;">
-                    <span style="display:inline-block;background:{confidence_bg};color:{confidence_fg};border-radius:999px;padding:0.15rem 0.55rem;font-weight:700;margin-right:0.45rem;">
-                        {confidence_label} · coverage {best_intv['coverage']:.0%}
-                    </span>
-                    권장: <b>{best_intv['recommended_action']}</b> &nbsp;|&nbsp;
-                    효과 크기: <b>{effect_val:.4f}</b> &nbsp;|&nbsp;
-                    방법: {best_intv['method']}
+        if has_actionable_intervention(intervention):
+            direction_icon = "+" if effect_val > 0 else "-" if effect_val < 0 else "="
+            confidence_label, confidence_bg, confidence_fg = coverage_confidence(float(best_intv["coverage"]))
+            st.markdown(
+                f"""
+                <div style="
+                    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+                    border-radius: 12px;
+                    padding: 1.3rem 1.5rem;
+                    margin: 1rem 0;
+                    color: #ffffff;
+                ">
+                    <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85; margin-bottom: 0.3rem;">추천 개입 타겟</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.2rem;">{best_intv['target']} ({direction_icon}{abs(effect_val):.4f})</div>
+                    <div style="font-size: 0.95rem; opacity: 0.9;">
+                        <span style="display:inline-block;background:{confidence_bg};color:{confidence_fg};border-radius:999px;padding:0.15rem 0.55rem;font-weight:700;margin-right:0.45rem;">
+                            {confidence_label} · coverage {best_intv['coverage']:.0%}
+                        </span>
+                        권장: <b>{best_intv['recommended_action']}</b> &nbsp;|&nbsp;
+                        효과 크기: <b>{effect_val:.4f}</b> &nbsp;|&nbsp;
+                        방법: {best_intv['method']}
+                    </div>
                 </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f"""
+                <div style="
+                    background: linear-gradient(135deg, #475569 0%, #334155 100%);
+                    border-radius: 12px;
+                    padding: 1.3rem 1.5rem;
+                    margin: 1rem 0;
+                    color: #ffffff;
+                ">
+                    <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85; margin-bottom: 0.3rem;">개입 추천 결과</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.2rem;">추천 가능한 개입 없음</div>
+                    <div style="font-size: 0.95rem; opacity: 0.9;">
+                        선택한 DAG에서는 후보 변수에서 <b>{outcome}</b>으로 향하는 directed path가 없거나, 추정 효과가 모두 0입니다.
+                        정답 구조를 기준으로 보거나 결과 변수를 바꾸면 다른 개입 효과가 나타날 수 있습니다.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
         st.markdown("#### 개입 효과 상세")
         st.dataframe(intervention, use_container_width=True, hide_index=True)
@@ -1947,9 +2089,20 @@ with tabs[2]:
 
     if ai_enabled and not intervention.empty:
         _ai_edges_intv = format_edges(chosen_dag.edges())
+        _has_actionable_intv = has_actionable_intervention(intervention)
         _intv_summary = "\n".join(
             f"- {row['target']}: effect={row['effect_high_minus_low']:.4f}, action={row['recommended_action']}, method={row['method']}"
             for _, row in intervention.iterrows()
+        )
+        _intv_instructions = (
+            "1) 가장 효과적인 개입 타겟은 무엇이고 왜 그런지\n"
+            "2) 각 변수의 개입 효과를 직관적으로 해석\n"
+            "3) 실제로 이 결과를 어떻게 활용할 수 있는지 한 줄 제안"
+            if _has_actionable_intv
+            else
+            "1) 이 DAG에서 추천 가능한 개입 타겟이 없다고 판단해야 하는 이유\n"
+            "2) directed path가 없거나 효과가 0인 결과를 어떻게 해석해야 하는지\n"
+            "3) 정답 구조나 결과 변수 변경으로 다시 확인해야 한다는 점"
         )
         _ai_prompt_intv = (
             f"당신은 인과 추론 전문가입니다. 아래 개입(intervention) 분석 결과를 비전문가가 바로 의사결정에 참고할 수 있게 한국어로 해석해주세요. "
@@ -1957,22 +2110,25 @@ with tabs[2]:
             f"데이터셋: {dataset_name}\n결과 변수({'높이고 싶은 것' if outcome_higher_is_better else '줄이고 싶은 것'}): {outcome}\n"
             f"사용한 DAG 구조: {_ai_edges_intv}\n\n"
             f"개입 효과 분석 결과:\n{_intv_summary}\n\n"
-            f"설명할 것:\n"
-            f"1) 가장 효과적인 개입 타겟은 무엇이고 왜 그런지\n"
-            f"2) 각 변수의 개입 효과를 직관적으로 해석\n"
-            f"3) 실제로 이 결과를 어떻게 활용할 수 있는지 한 줄 제안"
+            f"설명할 것:\n{_intv_instructions}"
         )
         _cache_key_i = prompt_cache_key("intervention", _ai_prompt_intv)
-        _top_intv = intervention.iloc[0]
-        _local_intv_summary = (
-            f"가장 큰 개입 효과를 보인 변수는 {_top_intv['target']}입니다. "
-            f"권장 행동은 {_top_intv['recommended_action']}이고, 효과 크기는 {_top_intv['effect_high_minus_low']:.4f}입니다. "
-            f"coverage는 {_top_intv['coverage']:.0%}로, coverage가 낮을수록 관측 가능한 조건 조합이 부족해 해석을 보수적으로 해야 합니다."
-        )
+        if _has_actionable_intv:
+            _top_intv = intervention.iloc[0]
+            _local_intv_summary = (
+                f"가장 큰 개입 효과를 보인 변수는 {_top_intv['target']}입니다. "
+                f"권장 행동은 {_top_intv['recommended_action']}이고, 효과 크기는 {_top_intv['effect_high_minus_low']:.4f}입니다. "
+                f"coverage는 {_top_intv['coverage']:.0%}로, coverage가 낮을수록 관측 가능한 조건 조합이 부족해 해석을 보수적으로 해야 합니다."
+            )
+        else:
+            _local_intv_summary = (
+                f"선택한 DAG에서는 후보 변수에서 {outcome}으로 향하는 directed path가 없거나 추정 효과가 모두 0입니다. "
+                "따라서 이 구조 기준으로는 추천 가능한 개입 타겟이 없으며, 정답 구조 또는 다른 결과 변수로 재확인해야 합니다."
+            )
         if st.button("AI 해석 생성", key="ai_btn_intervention"):
-            with st.spinner("Gemini가 개입 결과를 해석하는 중..."):
-                call_gemini(gemini_api_key, _ai_prompt_intv, _cache_key_i, _local_intv_summary)
-        _cached_i = st.session_state.get(f"gemini_{_cache_key_i}")
+            with st.spinner("Groq가 개입 결과를 해석하는 중..."):
+                call_groq(groq_api_key, _ai_prompt_intv, _cache_key_i, _local_intv_summary)
+        _cached_i = st.session_state.get(f"groq_{_cache_key_i}")
         if _cached_i:
             render_ai_box(_cached_i)
 
@@ -2117,7 +2273,7 @@ with tabs[3]:
             - 변수가 5개 이상으로 확장되면 Grover의 이차 속도향상 이점이 실질적으로 드러나기 시작합니다.
             - 이 접근은 양자 인과 발견 분야의 시작점으로서 의미가 있습니다.
 
-            **발표용 요약:** 이 앱은 관측 데이터에서 가능한 DAG를 점수화하고 개입 후보를 비교하는 탐색형 도구이며,
+            **요약:** 이 앱은 관측 데이터에서 가능한 DAG를 점수화하고 개입 후보를 비교하는 탐색형 도구이며,
             Grover 구현은 BDeu 상위 후보를 marked state로 둔 개념증명입니다.
             """
         )
@@ -2289,8 +2445,11 @@ with tabs[4]:
         _ai_intv_syn = ""
         _intv_preview = intervention_table(data, best_graph, variables, outcome, outcome_higher_is_better)
         if not _intv_preview.empty:
-            _top = _intv_preview.iloc[0]
-            _ai_intv_syn = f"최적 개입: {_top['target']} ({_top['recommended_action']}, effect={_top['effect_high_minus_low']:.4f})"
+            if has_actionable_intervention(_intv_preview):
+                _top = _intv_preview.iloc[0]
+                _ai_intv_syn = f"최적 개입: {_top['target']} ({_top['recommended_action']}, effect={_top['effect_high_minus_low']:.4f})"
+            else:
+                _ai_intv_syn = "개입 추천: 선택한 DAG 기준으로 추천 가능한 개입 없음(effect=0 또는 directed path 없음)"
         _ai_prompt_syn = (
             f"당신은 인과 추론 전문가입니다. 이 분석의 전체 결과를 종합해 비전문가에게 핵심 인사이트를 전달하세요. "
             f"마크다운 문법 없이 일반 텍스트로 4~5문장 이내로 작성하세요.\n\n"
@@ -2307,8 +2466,8 @@ with tabs[4]:
             "이 앱은 완전한 인과 증명이 아니라, DAG 후보를 점수화하고 개입 후보를 비교하는 탐색형 도구입니다."
         )
         if st.button("AI 종합 해석 생성", key="ai_btn_synthesis"):
-            with st.spinner("Gemini가 종합 분석을 생성하는 중..."):
-                call_gemini(gemini_api_key, _ai_prompt_syn, _cache_key_syn, _local_syn_summary)
-        _cached_syn = st.session_state.get(f"gemini_{_cache_key_syn}")
+            with st.spinner("Groq가 종합 분석을 생성하는 중..."):
+                call_groq(groq_api_key, _ai_prompt_syn, _cache_key_syn, _local_syn_summary)
+        _cached_syn = st.session_state.get(f"groq_{_cache_key_syn}")
         if _cached_syn:
             render_ai_box(_cached_syn)

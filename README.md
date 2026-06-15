@@ -19,9 +19,9 @@ streamlit run app.py
 - 정답 구조 대비 **SHD, Precision, Recall, F1** 비교
 - 발견된 DAG 기반 **개입 효과 추정** (backdoor adjustment) 및 coverage 신뢰도 배지 포함 타겟 추천
 - 결과 변수 방향 설정: "높일수록 좋음" (MPG, 성적) / "줄일수록 좋음" (심장병, 증상)
-- **Gemini API** 연동 자연어 해석 (선택 — API 키 없이도 전체 기능 사용 가능)
+- **Groq API** 연동 자연어 해석 (선택 — API 키 없이도 전체 기능 사용 가능)
 
-## 발표 추천
+## 시연 데이터셋
 
 5분 발표 시연은 **Sprinkler weather**를 기본 추천합니다. 구조가 직관적이고 변수 4개라 전수조사, 개입 추천, Grover 회로 실행을 안정적으로 설명하기 좋습니다.
 
@@ -47,4 +47,4 @@ streamlit run app.py
 
 ## 기술 스택
 
-Qiskit 2.0+, qiskit-aer, numpy, pandas, networkx, matplotlib, streamlit, bnlearn, google-generativeai (선택)
+Qiskit 2.0+, qiskit-aer, numpy, pandas, networkx, matplotlib, streamlit, bnlearn
