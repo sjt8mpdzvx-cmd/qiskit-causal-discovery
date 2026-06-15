@@ -171,27 +171,12 @@ DATASETS: dict[str, DatasetSpec] = {
         story="공중보건 기관이 심장병 발생률을 줄이려 할 때, 금연 캠페인·콜레스테롤 약·혈압 약 중 어디에 자원을 집중해야 하는지 인과 분석으로 판단하는 문제입니다.",
         outcome_higher_is_better=False,
     ),
-    "Student Performance (학생 성적)": DatasetSpec(
-        file="student_performance.csv",
-        description="포르투갈 중등학교 수학 과목 395명의 학습 습관·행동·성적 데이터입니다 (UCI ML Repository).",
-        default_vars=("StudyTime", "GoOut", "Absences", "FinalGrade"),
-        ground_truth=(
-            ("GoOut", "StudyTime"),
-            ("GoOut", "Absences"),
-            ("StudyTime", "FinalGrade"),
-            ("Absences", "FinalGrade"),
-        ),
-        outcome_hint="FinalGrade",
-        story="학교가 학생 성적을 높이려 할 때, 공부 시간 확보·출석 관리·외출 제한 중 어디에 개입하는 것이 가장 효과적인지 인과 구조를 통해 판단하는 문제입니다.",
-        outcome_higher_is_better=True,
-    ),
 }
 
 
 OUTCOME_DIRECTION_DEFAULTS: dict[str, bool] = {
     # Higher is better
     "MPG": True,
-    "FinalGrade": True,
     "StudyTime": True,
     # Higher is usually worse in the built-in stories
     "Erk": False,
@@ -207,8 +192,6 @@ OUTCOME_DIRECTION_DEFAULTS: dict[str, bool] = {
     "CigsPerDay": False,
     "Cholesterol": False,
     "SysBP": False,
-    "Absences": False,
-    "GoOut": False,
     "Displacement": False,
     "Horsepower": False,
     "Weight": False,
