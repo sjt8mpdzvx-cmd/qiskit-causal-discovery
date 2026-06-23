@@ -1228,7 +1228,10 @@ def plot_complexity_comparison(n_edges: int, top_k: int) -> plt.Figure:
     quantum = np.sqrt(classical / max(top_k, 1)) * (math.pi / 4)
 
     ax.semilogy(edge_range, classical, "-o", color="#ef4444", linewidth=2.2, markersize=5, label="Classical O(N)", zorder=3)
-    ax.semilogy(edge_range, quantum, "-s", color="#6366f1", linewidth=2.2, markersize=5, label=f"Grover O(√(N/{top_k}))", zorder=3)
+    # Keep this label ASCII-only.  Some Streamlit Cloud Matplotlib/font
+    # combinations route the square-root glyph through mathtext and fail
+    # while calculating tight layout.
+    ax.semilogy(edge_range, quantum, "-s", color="#6366f1", linewidth=2.2, markersize=5, label="Grover O(sqrt(N / k))", zorder=3)
     ax.axvline(n_edges, color="#f59e0b", linewidth=2, linestyle="--", alpha=0.7, label=f"Current ({n_edges} edges)")
     ax.fill_between(edge_range, quantum, classical, alpha=0.06, color="#6366f1")
     ax.set_xlabel("Number of edge candidates")
@@ -1257,7 +1260,12 @@ def plot_complexity_comparison(n_edges: int, top_k: int) -> plt.Figure:
     ax2.spines["top"].set_visible(False)
     ax2.spines["right"].set_visible(False)
 
-    fig.tight_layout(w_pad=3)
+    try:
+        fig.tight_layout(w_pad=3)
+    except ValueError:
+        # Rendering should not take down the full app if a deployment font
+        # cannot calculate a text bounding box.
+        fig.subplots_adjust(left=0.08, right=0.98, bottom=0.18, top=0.88, wspace=0.35)
     return fig
 
 
