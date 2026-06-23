@@ -16,14 +16,22 @@ streamlit run app.py
 python -m unittest discover -s tests -v
 ```
 
+## 배포 재현성
+
+GitHub Actions는 Python 3.13에서 테스트합니다. Streamlit Community Cloud에 배포할 때도 **Advanced settings → Python version**에서 Python 3.13을 선택하세요. 이미 다른 Python 버전으로 배포된 앱은 Cloud에서 삭제 후 같은 설정으로 다시 배포해야 Python 버전을 변경할 수 있습니다.
+
 ## 주요 기능
 
 - **7개 내장 데이터셋**: Sachs 단백질, Asia 폐질환, Sprinkler, Alarm ICU, Auto MPG, Framingham 심장병, Student 성적
-- **CSV 업로드** 및 2~4개 변수 선택
-- 모든 유효 DAG 열거 및 **BDeu 점수** 기반 고전 전수조사
+- **CSV 업로드** 및 2~8개 변수 선택
+- 2~4변수: 모든 유효 DAG 열거 및 **BDeu/BGe 점수** 기반 고전 전수조사
+- 5~8변수: 최대 부모 수 제한과 로컬 점수 캐시를 사용한 **hill-climbing 구조 탐색**
 - **Grover Oracle/Diffuser** 회로 실행 및 측정 분포 시각화 (Multi-run, Score-weighted 선택)
 - 정답 구조 대비 **SHD, Precision, Recall, F1** 비교
 - 발견된 DAG 기반 **개입 효과 추정** (backdoor adjustment) 및 coverage 신뢰도 배지 포함 타겟 추천
+- 구조 엣지 안정성·개입 효과 95% 구간을 위한 **Bootstrap 신뢰도 분석**
+- 회로 자원(깊이, 2큐비트 게이트) 및 선택적 depolarizing **노이즈 시뮬레이션**
+- 재현 설정을 포함한 HTML 분석 보고서·개입 효과 CSV 다운로드
 - 결과 변수 방향 설정: "높일수록 좋음" (MPG, 성적) / "줄일수록 좋음" (심장병, 증상)
 - **Groq API** 연동 자연어 해석 (선택 — API 키 없이도 전체 기능 사용 가능)
 
@@ -51,6 +59,8 @@ python -m unittest discover -s tests -v
 - **Markov equivalence**: 관측 데이터만으로는 동일한 조건부 독립 관계를 가진 여러 DAG를 구분할 수 없어, 정답 대비 F1이 낮을 수 있습니다.
 - **이산화**: 연속형 변수의 3분위 이산화로 인해 개입 효과는 원래 단위가 아닌 이산화 단위 기준입니다.
 - **BGe 적용 범위**: BGe는 연속형 수치 변수에만 적용합니다. 이산·범주형 변수는 BDeu를 사용해야 합니다.
+- **확장 탐색**: 5~8변수 hill-climbing은 전수조사 결과가 아닌 지역 최적해이며, 양자 시뮬레이션과 직접 비교하지 않습니다.
+- **양자 노이즈**: 제공되는 노이즈 모델은 실제 특정 하드웨어의 보정값이 아닌 회로 민감도를 확인하기 위한 단순 depolarizing 모델입니다.
 
 ## 기술 스택
 

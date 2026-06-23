@@ -70,14 +70,19 @@ matplotlib.rcParams.update({
 
 APP_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(APP_DIR, "data")
+MAX_QUANTUM_VARIABLES = 4
+MAX_HEURISTIC_VARIABLES = 8
 sys.path.insert(0, APP_DIR)
 
 from src.dag_utils import (  # noqa: E402
     bitstring_to_dag,
+    dag_to_bitstring,
     edge_metrics,
     enumerate_all_dags,
+    get_edge_list,
     structural_hamming_distance,
 )
+from src.heuristic_search import hill_climb_search  # noqa: E402
 from src.grover_search import run_grover_search  # noqa: E402
 from src.scoring import score_all_dags  # noqa: E402
 
@@ -332,8 +337,8 @@ def read_csv_bytes(csv_bytes: bytes) -> pd.DataFrame:
 def validate_selected_variables(raw: pd.DataFrame, variables: list[str]) -> None:
     if len(variables) < 2:
         raise ValueError("분석하려면 변수를 2개 이상 선택해야 합니다.")
-    if len(variables) > 4:
-        raise ValueError("현재 Grover 시뮬레이션은 변수 4개까지 안정적으로 지원합니다.")
+    if len(variables) > MAX_HEURISTIC_VARIABLES:
+        raise ValueError(f"현재 확장 탐색은 변수 {MAX_HEURISTIC_VARIABLES}개까지 지원합니다.")
     missing = [var for var in variables if var not in raw.columns]
     if missing:
         raise ValueError(f"CSV에 없는 변수가 선택되었습니다: {', '.join(missing)}")
@@ -396,6 +401,16 @@ def score_from_csv_bytes_bge(
     """BGe 점수 — 연속 데이터를 이산화 없이 직접 평가."""
     raw = read_csv_bytes(csv_bytes)
     variables = list(variables_tuple)
+    data = prepare_bge_data(raw, variables)
+    start = time.time()
+    valid_dags, edge_list = enumerate_all_dags(variables)
+    scored = score_all_dags_bge(data, valid_dags, variables)
+    elapsed = time.time() - start
+    return data, valid_dags, edge_list, scored, elapsed
+
+
+def prepare_bge_data(raw: pd.DataFrame, variables: list[str]) -> pd.DataFrame:
+    """Validate and prepare continuous data for BGe without enumerating DAGs."""
     validate_selected_variables(raw, variables)
     data = raw[variables].copy()
     data = data.replace([np.inf, -np.inf], np.nan).dropna(subset=variables)
@@ -418,12 +433,7 @@ def score_from_csv_bytes_bge(
             f"고유값이 8개 이하인 열({', '.join(discrete_like)})은 BDeu를 선택하세요."
         )
     data = data.astype(float)
-    data = data.reset_index(drop=True)
-    start = time.time()
-    valid_dags, edge_list = enumerate_all_dags(variables)
-    scored = score_all_dags_bge(data, valid_dags, variables)
-    elapsed = time.time() - start
-    return data, valid_dags, edge_list, scored, elapsed
+    return data.reset_index(drop=True)
 
 
 def known_layout(variables: list[str]) -> dict[str, tuple[float, float]] | None:
@@ -716,6 +726,249 @@ def graph_metrics(reference: nx.DiGraph | None, graph: nx.DiGraph) -> dict[str, 
     metrics = edge_metrics(reference, graph)
     metrics["shd"] = structural_hamming_distance(reference, graph)
     return metrics
+
+
+def bootstrap_structure_stability(
+    data: pd.DataFrame,
+    variables: list[str],
+    valid_dags: list[tuple[str, nx.DiGraph]],
+    edge_list: list[tuple[str, str]],
+    use_bge: bool,
+    ess: int,
+    n_bootstrap: int,
+    seed: int,
+) -> pd.DataFrame:
+    """Estimate edge-selection stability by resampling rows with replacement."""
+    edge_counts = {edge: 0 for edge in edge_list}
+    for replicate in range(n_bootstrap):
+        sample = data.sample(
+            n=len(data), replace=True, random_state=seed + replicate
+        ).reset_index(drop=True)
+        if use_bge:
+            scored = score_all_dags_bge(sample, valid_dags, variables)
+        else:
+            scored = score_all_dags(sample, valid_dags, variables, equivalent_sample_size=ess)
+        for edge in scored[0][1].edges():
+            edge_counts[edge] += 1
+
+    rows = [
+        {
+            "edge": f"{source}->{target}",
+            "selection_rate": count / n_bootstrap,
+            "selected_runs": count,
+            "bootstrap_runs": n_bootstrap,
+            "stability": "높음" if count / n_bootstrap >= 0.8 else "중간" if count / n_bootstrap >= 0.5 else "낮음",
+        }
+        for (source, target), count in edge_counts.items()
+    ]
+    return pd.DataFrame(rows).sort_values("selection_rate", ascending=False).reset_index(drop=True)
+
+
+def bootstrap_heuristic_structure_stability(
+    data: pd.DataFrame,
+    variables: list[str],
+    use_bge: bool,
+    ess: int,
+    max_parents: int,
+    n_bootstrap: int,
+    seed: int,
+) -> pd.DataFrame:
+    """Bootstrap edge stability for parent-limited hill-climbing search."""
+    edge_list = get_edge_list(variables)
+    edge_counts = {edge: 0 for edge in edge_list}
+    for replicate in range(n_bootstrap):
+        sample = data.sample(
+            n=len(data), replace=True, random_state=seed + replicate
+        ).reset_index(drop=True)
+        result = hill_climb_search(
+            sample,
+            variables,
+            max_parents=max_parents,
+            scoring_method="bge" if use_bge else "bdeu",
+            equivalent_sample_size=ess,
+        )
+        for edge in result["best_dag"].edges():
+            edge_counts[edge] += 1
+    rows = [
+        {
+            "edge": f"{source}->{target}",
+            "selection_rate": count / n_bootstrap,
+            "selected_runs": count,
+            "bootstrap_runs": n_bootstrap,
+            "stability": "높음" if count / n_bootstrap >= 0.8 else "중간" if count / n_bootstrap >= 0.5 else "낮음",
+        }
+        for (source, target), count in edge_counts.items()
+    ]
+    return pd.DataFrame(rows).sort_values("selection_rate", ascending=False).reset_index(drop=True)
+
+
+def plot_edge_stability(stability: pd.DataFrame) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=(7.5, max(3.2, 0.35 * len(stability))))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#fafbfc")
+    values = stability["selection_rate"].to_numpy()
+    colors = ["#059669" if value >= 0.8 else "#f59e0b" if value >= 0.5 else "#94a3b8" for value in values]
+    ax.barh(stability["edge"], values, color=colors, edgecolor="#ffffff")
+    ax.axvline(0.8, color="#059669", linestyle="--", linewidth=1, label="high stability")
+    ax.axvline(0.5, color="#f59e0b", linestyle="--", linewidth=1, label="medium stability")
+    ax.set_xlim(0, 1)
+    ax.set_xlabel("Bootstrap selection rate")
+    ax.set_title("Edge Stability Across Bootstrap Samples", fontsize=12, fontweight="bold")
+    ax.invert_yaxis()
+    ax.legend(fontsize=8, loc="lower right")
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+def bootstrap_intervention_uncertainty(
+    data: pd.DataFrame,
+    dag: nx.DiGraph,
+    variables: list[str],
+    outcome: str,
+    higher_is_better: bool,
+    n_bootstrap: int,
+    seed: int,
+) -> pd.DataFrame:
+    """Summarize intervention-effect uncertainty and top-target stability."""
+    effects: dict[str, list[float]] = {target: [] for target in variables if target != outcome}
+    top_counts = {target: 0 for target in effects}
+
+    for replicate in range(n_bootstrap):
+        sample = data.sample(
+            n=len(data), replace=True, random_state=seed + replicate
+        ).reset_index(drop=True)
+        table = intervention_table(sample, dag, variables, outcome, higher_is_better)
+        estimable = table.dropna(subset=["effect_high_minus_low"])
+        if estimable.empty:
+            continue
+        for _, row in estimable.iterrows():
+            effects[row["target"]].append(float(row["effect_high_minus_low"]))
+        top_target = estimable.iloc[0]["target"]
+        top_counts[top_target] += 1
+
+    rows = []
+    for target, samples in effects.items():
+        if samples:
+            values = np.asarray(samples)
+            positive = float(np.mean(values > 0))
+            negative = float(np.mean(values < 0))
+            rows.append(
+                {
+                    "target": target,
+                    "effect_median": float(np.median(values)),
+                    "ci_95_low": float(np.quantile(values, 0.025)),
+                    "ci_95_high": float(np.quantile(values, 0.975)),
+                    "sign_stability": max(positive, negative),
+                    "top_target_rate": top_counts[target] / n_bootstrap,
+                    "estimable_runs": len(values),
+                    "bootstrap_runs": n_bootstrap,
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "target": target,
+                    "effect_median": np.nan,
+                    "ci_95_low": np.nan,
+                    "ci_95_high": np.nan,
+                    "sign_stability": 0.0,
+                    "top_target_rate": 0.0,
+                    "estimable_runs": 0,
+                    "bootstrap_runs": n_bootstrap,
+                }
+            )
+    return pd.DataFrame(rows).sort_values("top_target_rate", ascending=False).reset_index(drop=True)
+
+
+def plot_intervention_uncertainty(summary: pd.DataFrame) -> plt.Figure:
+    valid = summary.dropna(subset=["effect_median"])
+    fig, ax = plt.subplots(figsize=(7.5, max(3.0, 0.55 * max(len(valid), 1))))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#fafbfc")
+    if valid.empty:
+        ax.text(0.5, 0.5, "No estimable bootstrap intervention effects", ha="center", va="center", transform=ax.transAxes)
+        ax.axis("off")
+        return fig
+    lower = valid["effect_median"] - valid["ci_95_low"]
+    upper = valid["ci_95_high"] - valid["effect_median"]
+    colors = ["#059669" if value >= 0.8 else "#f59e0b" for value in valid["sign_stability"]]
+    ax.errorbar(valid["effect_median"], valid["target"], xerr=np.vstack([lower, upper]), fmt="none", ecolor="#64748b", capsize=4, zorder=2)
+    ax.scatter(valid["effect_median"], valid["target"], s=70, color=colors, zorder=3)
+    ax.axvline(0, color="#334155", linewidth=1)
+    ax.set_xlabel("Bootstrap effect median and 95% interval")
+    ax.set_title("Intervention Effect Uncertainty", fontsize=12, fontweight="bold")
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+def circuit_resource_summary(circuit) -> dict[str, int]:
+    """Return hardware-relevant resource counts without assuming a backend."""
+    counts = dict(circuit.count_ops())
+    two_qubit_names = {"cx", "cz", "cp", "swap", "ecr", "rxx", "ryy", "rzz"}
+    multi_qubit_names = {"ccx", "mcx", "mcphase"}
+    return {
+        "qubits": circuit.num_qubits,
+        "depth": circuit.depth(),
+        "operations": sum(counts.values()),
+        "two_qubit_gates": sum(count for name, count in counts.items() if name in two_qubit_names),
+        "multi_qubit_gates": sum(count for name, count in counts.items() if name in multi_qubit_names),
+    }
+
+
+def simulate_noisy_grover(circuit, good_bitstrings: list[str], shots: int, error_rate: float) -> dict:
+    """Run the measured Grover circuit with a simple depolarizing-noise model."""
+    from qiskit import transpile
+    from qiskit_aer import AerSimulator
+    from qiskit_aer.noise import NoiseModel, depolarizing_error
+
+    noise_model = NoiseModel()
+    one_qubit_error = depolarizing_error(error_rate, 1)
+    two_qubit_error = depolarizing_error(min(error_rate * 2, 0.99), 2)
+    noise_model.add_all_qubit_quantum_error(one_qubit_error, ["x", "h", "z", "p", "rz", "rx"])
+    noise_model.add_all_qubit_quantum_error(two_qubit_error, ["cx", "cz", "cp", "swap"])
+    simulator = AerSimulator(noise_model=noise_model)
+    compiled = transpile(circuit, simulator, optimization_level=0)
+    counts = simulator.run(compiled, shots=shots).result().get_counts()
+    corrected = {bitstring[::-1]: count for bitstring, count in counts.items()}
+    good_probability = sum(corrected.get(bitstring, 0) for bitstring in good_bitstrings) / shots
+    return {"counts": corrected, "good_probability": good_probability, "error_rate": error_rate}
+
+
+def build_analysis_report(
+    dataset_name: str,
+    variables: list[str],
+    outcome: str,
+    scoring_label: str,
+    best_graph: nx.DiGraph,
+    best_score: float,
+    intervention: pd.DataFrame,
+    config: dict[str, str | int | float],
+    grover_result: dict | None,
+) -> str:
+    """Create a self-contained, escaped HTML analysis report for download."""
+    config_rows = "".join(
+        f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(value))}</td></tr>"
+        for key, value in config.items()
+    )
+    grover_html = "Not executed"
+    if grover_result:
+        grover_html = (
+            f"Qubits: {grover_result['n_qubits']}, iterations: {grover_result['n_iterations']}, "
+            f"oracle-hit probability: {grover_result['good_probability']:.2%}, "
+            f"selected bitstring: {html.escape(grover_result['selected_bitstring'])}"
+        )
+    return f"""<!doctype html>
+<html><head><meta charset='utf-8'><title>Quantum Causal Discovery Report</title>
+<style>body{{font-family:Arial,sans-serif;max-width:900px;margin:32px auto;color:#1e293b}}table{{border-collapse:collapse;width:100%;margin:12px 0}}th,td{{border:1px solid #cbd5e1;padding:8px;text-align:left}}th{{background:#f1f5f9}}h1,h2{{color:#312e81}}</style></head>
+<body><h1>Quantum Causal Discovery Report</h1>
+<p><b>Dataset:</b> {html.escape(dataset_name)}<br><b>Variables:</b> {html.escape(', '.join(variables))}<br><b>Outcome:</b> {html.escape(outcome)}</p>
+<h2>Reproducibility configuration</h2><table>{config_rows}</table>
+<h2>Best structure</h2><p><b>{html.escape(scoring_label)} score:</b> {best_score:.4f}<br><b>Edges:</b> {html.escape(format_edges(best_graph.edges()))}</p>
+<h2>Intervention estimates</h2>{intervention.to_html(index=False, escape=True)}
+<h2>Quantum experiment</h2><p>{html.escape(grover_html)}</p>
+</body></html>"""
 
 
 def grover_iteration_count(n_qubits: int, target_count: int) -> int:
@@ -1328,7 +1581,7 @@ def plot_radar_comparison(
         grover_vals[0] = grover_metrics.get("precision", 0)
         grover_vals[1] = grover_metrics.get("recall", 0)
         grover_vals[2] = grover_metrics.get("f1", 0)
-        rank = grover_result.get("selected_rank", 999)
+        rank = grover_result.get("selected_rank") or 999
         grover_vals[3] = max(0, 1.0 - (rank - 1) / max(20, rank))
         total_N = 2 ** n_edges
         grover_iters = max(1, int(math.pi / 4 * math.sqrt(total_N / max(top_k, 1))))
@@ -2102,7 +2355,7 @@ if data_mode == "내장 데이터셋":
         "분석 변수",
         list(raw_df.columns),
         default=default_vars[:4],
-        max_selections=4,
+        max_selections=MAX_HEURISTIC_VARIABLES,
     )
     ground_truth_edges = list(spec.ground_truth)
     story = spec.story
@@ -2134,7 +2387,7 @@ else:
         "분석 변수",
         list(raw_df.columns),
         default=list(raw_df.columns[: min(3, len(raw_df.columns))]),
-        max_selections=4,
+        max_selections=MAX_HEURISTIC_VARIABLES,
     )
     story = "사용자가 업로드한 데이터에서 변수 사이의 인과 구조를 탐색합니다."
     outcome_hint = None
@@ -2147,8 +2400,8 @@ if len(selected_vars) < 2:
     st.stop()
 
 variables = list(selected_vars)
-if len(variables) > 4:
-    st.warning("Grover 시뮬레이션 안정성을 위해 변수는 최대 4개까지 선택합니다.")
+if len(variables) > MAX_HEURISTIC_VARIABLES:
+    st.warning(f"확장 탐색은 변수 최대 {MAX_HEURISTIC_VARIABLES}개까지 지원합니다.")
     st.stop()
 
 if data_mode == "내장 데이터셋":
@@ -2172,6 +2425,22 @@ ess = int(st.sidebar.slider("BDeu ESS", min_value=1, max_value=50, value=10, dis
 top_k = int(st.sidebar.slider("Grover Oracle top-k", min_value=1, max_value=20, value=6))
 shots = int(st.sidebar.slider("측정 shots", min_value=512, max_value=8192, value=4096, step=512))
 auto_discretize = st.sidebar.toggle("연속형 변수 3분위 이산화", value=True, disabled=use_bge)
+if len(variables) == 2:
+    max_parents = 1
+    st.sidebar.caption("확장 탐색 최대 부모 수: 1 (변수 2개)")
+else:
+    max_parents = int(
+        st.sidebar.slider(
+            "확장 탐색 최대 부모 수",
+            min_value=1,
+            max_value=min(4, len(variables) - 1),
+            value=min(3, len(variables) - 1),
+            help="변수가 5개 이상일 때 hill-climbing 탐색이 고려하는 노드당 최대 부모 수입니다.",
+        )
+    )
+with st.sidebar.expander("신뢰도 분석 (Bootstrap)"):
+    bootstrap_reps = int(st.slider("반복 횟수", min_value=20, max_value=100, value=30, step=10))
+    bootstrap_seed = int(st.number_input("재현 시드", min_value=0, max_value=1_000_000, value=42, step=1))
 
 outcome_default = variables[-1]
 if outcome_hint in variables:
@@ -2205,6 +2474,130 @@ ai_enabled = bool(groq_api_key)
 csv_bytes = uploaded_bytes if uploaded_bytes is not None else raw_df.to_csv(index=False).encode("utf-8")
 
 _scoring_label = "BGe" if use_bge else "BDeu"
+is_quantum_compatible = len(variables) <= MAX_QUANTUM_VARIABLES
+
+if not is_quantum_compatible:
+    # Keep the interactive teaching/quantum dashboard bounded to four
+    # variables, while still giving larger selections a useful classical
+    # score-based workflow instead of rejecting them outright.
+    with st.spinner("로컬 점수 캐시를 만들고 hill-climbing 구조 탐색을 실행하는 중입니다."):
+        _scalable_raw = read_csv_bytes(csv_bytes)
+        _scalable_data = (
+            prepare_bge_data(_scalable_raw, variables)
+            if use_bge
+            else discretize_for_bdeu(_scalable_raw, variables, auto_discretize)
+        )
+        _scalable_result = hill_climb_search(
+            _scalable_data,
+            variables,
+            max_parents=max_parents,
+            scoring_method="bge" if use_bge else "bdeu",
+            equivalent_sample_size=ess,
+        )
+
+    _scalable_graph = _scalable_result["best_dag"]
+    _scalable_edges = _scalable_result["edge_list"]
+    _scalable_truth = build_ground_truth(variables, ground_truth_edges)
+    _scalable_metrics = graph_metrics(
+        _scalable_truth if len(_scalable_truth.edges()) else None, _scalable_graph
+    )
+    _scalable_intervention = intervention_table(
+        _scalable_data,
+        _scalable_graph,
+        variables,
+        outcome,
+        outcome_higher_is_better,
+    )
+    _scalable_digest = hashlib.sha256(csv_bytes).hexdigest()[:16]
+
+    st.title("Scalable Causal Structure Search")
+    st.info(
+        f"{len(variables)}개 변수를 선택했습니다. Grover 시뮬레이션은 {MAX_QUANTUM_VARIABLES}개 이하에서만 실행하고, "
+        f"현재는 최대 부모 수 {max_parents}의 로컬 점수 캐시와 hill-climbing으로 탐색합니다."
+    )
+    scalable_metrics = st.columns(4)
+    scalable_metrics[0].metric("분석 변수", f"{len(variables)}개")
+    scalable_metrics[1].metric("최대 부모 수", max_parents)
+    scalable_metrics[2].metric(f"최적 {_scoring_label}", f"{_scalable_result['best_score']:.2f}")
+    scalable_metrics[3].metric("후보 이동 평가", f"{_scalable_result['evaluations']:,}")
+    scalable_cols = st.columns([1, 1])
+    with scalable_cols[0]:
+        st.pyplot(
+            draw_dag(
+                _scalable_graph,
+                variables,
+                "Hill-climbing Best DAG",
+                reference=_scalable_truth if len(_scalable_truth.edges()) else None,
+            ),
+            use_container_width=True,
+        )
+    with scalable_cols[1]:
+        st.markdown("#### 탐색 이력")
+        st.dataframe(pd.DataFrame(_scalable_result["trace"]), use_container_width=True, hide_index=True)
+    st.markdown("#### 개입 후보")
+    st.dataframe(_scalable_intervention, use_container_width=True, hide_index=True)
+    st.markdown("#### Bootstrap 신뢰도")
+    _scalable_bootstrap_key = f"scalable|{_scalable_digest}|{max_parents}|{bootstrap_reps}|{bootstrap_seed}"
+    bootstrap_cols = st.columns(2)
+    with bootstrap_cols[0]:
+        if st.button("구조 안정성 분석 실행", key="scalable_structure_bootstrap_btn"):
+            with st.spinner(f"확장 탐색 Bootstrap 구조 학습 {bootstrap_reps}회 실행 중..."):
+                st.session_state["scalable_structure_stability"] = bootstrap_heuristic_structure_stability(
+                    _scalable_data,
+                    variables,
+                    use_bge,
+                    ess,
+                    max_parents,
+                    bootstrap_reps,
+                    bootstrap_seed,
+                )
+                st.session_state["scalable_structure_stability_key"] = _scalable_bootstrap_key
+    with bootstrap_cols[1]:
+        if st.button("개입 신뢰도 분석 실행", key="scalable_intervention_bootstrap_btn"):
+            with st.spinner(f"확장 탐색 Bootstrap 개입 추정 {bootstrap_reps}회 실행 중..."):
+                st.session_state["scalable_intervention_uncertainty"] = bootstrap_intervention_uncertainty(
+                    _scalable_data,
+                    _scalable_graph,
+                    variables,
+                    outcome,
+                    outcome_higher_is_better,
+                    bootstrap_reps,
+                    bootstrap_seed,
+                )
+                st.session_state["scalable_intervention_uncertainty_key"] = _scalable_bootstrap_key
+    _scalable_structure_stability = st.session_state.get("scalable_structure_stability")
+    if st.session_state.get("scalable_structure_stability_key") == _scalable_bootstrap_key:
+        st.pyplot(plot_edge_stability(_scalable_structure_stability), use_container_width=True)
+        st.dataframe(_scalable_structure_stability, use_container_width=True, hide_index=True)
+    _scalable_intervention_uncertainty = st.session_state.get("scalable_intervention_uncertainty")
+    if st.session_state.get("scalable_intervention_uncertainty_key") == _scalable_bootstrap_key:
+        st.pyplot(plot_intervention_uncertainty(_scalable_intervention_uncertainty), use_container_width=True)
+        st.dataframe(_scalable_intervention_uncertainty, use_container_width=True, hide_index=True)
+    _scalable_report = build_analysis_report(
+        dataset_name,
+        variables,
+        outcome,
+        _scoring_label,
+        _scalable_graph,
+        _scalable_result["best_score"],
+        _scalable_intervention,
+        {
+            "search_mode": "cached local-score hill climbing",
+            "data_sha256_prefix": _scalable_digest,
+            "max_parents": max_parents,
+            "scoring_method": _scoring_label,
+            "BDeu_ESS": ess if not use_bge else "not applicable",
+        },
+        None,
+    )
+    st.download_button(
+        "확장 탐색 HTML 보고서 다운로드",
+        data=_scalable_report,
+        file_name="scalable_causal_discovery_report.html",
+        mime="text/html",
+    )
+    st.stop()
+
 with st.spinner(f"DAG 후보를 열거하고 {_scoring_label} 점수를 계산하는 중입니다."):
     try:
         if use_bge:
@@ -2772,6 +3165,38 @@ with tabs[2]:
         hide_index=True,
     )
 
+    st.markdown("#### 구조 신뢰도: Bootstrap 안정성")
+    st.caption(
+        f"데이터를 복원추출해 {bootstrap_reps}회 다시 학습합니다. 각 화살표의 선택 비율이 높을수록 표본 변화에 안정적입니다."
+    )
+    _structure_bootstrap_key = f"{run_key}|structure|{bootstrap_reps}|{bootstrap_seed}"
+    if st.button("구조 안정성 분석 실행", key="structure_bootstrap_btn"):
+        with st.spinner(f"Bootstrap 구조 학습 {bootstrap_reps}회 실행 중..."):
+            _structure_stability = bootstrap_structure_stability(
+                data,
+                variables,
+                valid_dags,
+                edge_list,
+                use_bge,
+                ess,
+                bootstrap_reps,
+                bootstrap_seed,
+            )
+        st.session_state["structure_stability"] = _structure_stability
+        st.session_state["structure_stability_key"] = _structure_bootstrap_key
+    _structure_stability = st.session_state.get("structure_stability")
+    if _structure_stability is not None and st.session_state.get("structure_stability_key") == _structure_bootstrap_key:
+        stability_cols = st.columns([1.05, 0.95])
+        with stability_cols[0]:
+            st.pyplot(plot_edge_stability(_structure_stability), use_container_width=True)
+        with stability_cols[1]:
+            st.dataframe(_structure_stability, use_container_width=True, hide_index=True)
+        stable_edges = _structure_stability[_structure_stability["selection_rate"] >= 0.8]
+        st.info(
+            f"안정 엣지: {len(stable_edges)}개 / {len(_structure_stability)}개. "
+            "낮은 안정성의 엣지는 단일 최적 DAG만으로 방향을 단정하지 마세요."
+        )
+
     with st.expander(f"{_scoring_label} 점수와 구조 학습의 한계"):
         if use_bge:
             st.markdown(
@@ -2945,6 +3370,45 @@ with tabs[3]:
         st.markdown("#### 개입 효과 상세")
         st.dataframe(intervention, use_container_width=True, hide_index=True)
 
+        st.markdown("#### 개입 추천 신뢰도: Bootstrap 구간")
+        st.caption(
+            f"동일한 DAG에서 데이터를 {bootstrap_reps}회 복원추출합니다. 점은 중앙 효과, 선은 95% 구간이며 초록색은 방향이 안정적인 후보입니다."
+        )
+        _intervention_bootstrap_key = "|".join(
+            [
+                run_key,
+                "intervention",
+                dag_to_bitstring(chosen_dag, edge_list),
+                outcome,
+                str(outcome_higher_is_better),
+                str(bootstrap_reps),
+                str(bootstrap_seed),
+            ]
+        )
+        if st.button("개입 신뢰도 분석 실행", key="intervention_bootstrap_btn"):
+            with st.spinner(f"Bootstrap 개입 추정 {bootstrap_reps}회 실행 중..."):
+                _intervention_uncertainty = bootstrap_intervention_uncertainty(
+                    data,
+                    chosen_dag,
+                    variables,
+                    outcome,
+                    outcome_higher_is_better,
+                    bootstrap_reps,
+                    bootstrap_seed,
+                )
+            st.session_state["intervention_uncertainty"] = _intervention_uncertainty
+            st.session_state["intervention_uncertainty_key"] = _intervention_bootstrap_key
+        _intervention_uncertainty = st.session_state.get("intervention_uncertainty")
+        if (
+            _intervention_uncertainty is not None
+            and st.session_state.get("intervention_uncertainty_key") == _intervention_bootstrap_key
+        ):
+            uncertainty_cols = st.columns([1.05, 0.95])
+            with uncertainty_cols[0]:
+                st.pyplot(plot_intervention_uncertainty(_intervention_uncertainty), use_container_width=True)
+            with uncertainty_cols[1]:
+                st.dataframe(_intervention_uncertainty, use_container_width=True, hide_index=True)
+
         st.markdown(
             f"""
             <div class="status-band">
@@ -3067,11 +3531,13 @@ with tabs[4]:
     # current environment can no longer import Qiskit.
     n_runs = 1
     use_penalty = False
+    simulate_noise = False
+    noise_error_rate = 0.002
     qiskit_ok, qiskit_error = check_qiskit()
     if not qiskit_ok:
         st.error(f"Qiskit 또는 qiskit-aer를 불러올 수 없습니다: {qiskit_error}")
     else:
-        run_cols = st.columns([0.15, 0.15, 0.2, 0.5])
+        run_cols = st.columns([0.15, 0.14, 0.18, 0.18, 0.35])
         with run_cols[0]:
             run_pressed = st.button("Grover 실행", type="primary", use_container_width=True)
         with run_cols[1]:
@@ -3079,6 +3545,12 @@ with tabs[4]:
         with run_cols[2]:
             use_penalty = st.toggle("Penalty Oracle", value=False, help="순환 DAG의 위상을 변경합니다. 간섭에 따라 유효 DAG 측정률이 달라질 수 있습니다.") if run_grover_search_with_penalty is not None else False
         with run_cols[3]:
+            simulate_noise = st.toggle("Noise simulator", value=False, help="간단한 depolarizing noise 모델로 이상적 시뮬레이션과 차이를 비교합니다.")
+            if simulate_noise:
+                noise_error_rate = float(
+                    st.slider("Noise p", 0.0001, 0.02, 0.002, 0.0001, format="%.4f")
+                )
+        with run_cols[4]:
             _penalty_note = " + Penalty Oracle (순환 DAG 위상 변경)" if use_penalty else ""
             st.markdown(
                 f"<p class='small-note'>반복 {grover_iteration_count(n_edges, top_k_effective)}회 x {n_runs} runs{_penalty_note}. "
@@ -3114,6 +3586,16 @@ with tabs[4]:
                 best_result["all_run_probs"] = all_run_probs
                 best_result["n_runs"] = n_runs
                 best_result["used_penalty"] = use_penalty
+                if simulate_noise:
+                    try:
+                        best_result["noise_result"] = simulate_noisy_grover(
+                            best_result["circuit"],
+                            good_bitstrings,
+                            shots,
+                            noise_error_rate,
+                        )
+                    except Exception as exc:
+                        best_result["noise_error"] = str(exc)
             st.session_state["grover_result"] = best_result
             st.session_state["grover_run_key"] = run_key
 
@@ -3163,6 +3645,22 @@ with tabs[4]:
             result_cols[5].metric("Multi-run", f"{grover_result['n_runs']}회", f"avg {avg_prob*100:.1f}%")
         else:
             result_cols[5].metric("실행 시간", f"{grover_result['elapsed_time']:.3f}s")
+
+        resources = circuit_resource_summary(grover_result["circuit"])
+        resource_cols = st.columns(4)
+        resource_cols[0].metric("총 연산", f"{resources['operations']:,}")
+        resource_cols[1].metric("2-큐비트 게이트", f"{resources['two_qubit_gates']:,}")
+        resource_cols[2].metric("다중 제어 게이트", f"{resources['multi_qubit_gates']:,}")
+        resource_cols[3].metric("하드웨어 요구 큐비트", resources["qubits"])
+        if grover_result.get("noise_result"):
+            noisy = grover_result["noise_result"]
+            st.info(
+                f"Noise simulator (depolarizing p={noisy['error_rate']:.3%}): "
+                f"Oracle 적중률 {noisy['good_probability']:.1%} "
+                f"(이상적 {grover_result['good_probability']:.1%})"
+            )
+        elif grover_result.get("noise_error"):
+            st.warning(f"Noise simulator를 실행하지 못했습니다: {grover_result['noise_error']}")
 
         st.pyplot(plot_grover_counts(grover_result["counts"], good_bitstrings, valid_bitstrings), use_container_width=True)
 
@@ -3619,6 +4117,60 @@ with tabs[5]:
                 """,
                 unsafe_allow_html=True,
             )
+
+    st.divider()
+    st.markdown("#### 재현 가능한 분석 보고서")
+    _report_intervention = intervention_table(
+        data, best_graph, variables, outcome, outcome_higher_is_better
+    )
+    try:
+        import qiskit
+        _qiskit_version = qiskit.__version__
+    except Exception:
+        _qiskit_version = "unavailable"
+    _report_config = {
+        "dataset": dataset_name,
+        "data_sha256_prefix": data_digest,
+        "scoring_method": _scoring_label,
+        "variables": ", ".join(variables),
+        "outcome": outcome,
+        "outcome_direction": "higher is better" if outcome_higher_is_better else "lower is better",
+        "BDeu_ESS": ess if not use_bge else "not applicable",
+        "oracle_top_k": top_k_effective,
+        "shots": shots,
+        "bootstrap_repetitions": bootstrap_reps,
+        "bootstrap_seed": bootstrap_seed,
+        "python_version": sys.version.split()[0],
+        "qiskit_version": _qiskit_version,
+    }
+    _report_html = build_analysis_report(
+        dataset_name,
+        variables,
+        outcome,
+        _scoring_label,
+        best_graph,
+        best_score,
+        _report_intervention,
+        _report_config,
+        active_grover_r if grover_active else None,
+    )
+    download_cols = st.columns(2)
+    with download_cols[0]:
+        st.download_button(
+            "HTML 분석 보고서 다운로드",
+            data=_report_html,
+            file_name="quantum_causal_discovery_report.html",
+            mime="text/html",
+            use_container_width=True,
+        )
+    with download_cols[1]:
+        st.download_button(
+            "개입 효과 CSV 다운로드",
+            data=_report_intervention.to_csv(index=False).encode("utf-8-sig"),
+            file_name="intervention_effects.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
     # ── 전체 결론 ──
     st.divider()
