@@ -78,8 +78,9 @@ from src.dag_utils import (  # noqa: E402
     enumerate_all_dags,
     structural_hamming_distance,
 )
-from src.grover_search import run_grover_search  # noqa: E402
-from src.scoring import score_all_dags  # noqa: E402
+from src.grover_search import run_grover_search, run_grover_search_with_penalty  # noqa: E402
+from src.scoring import score_all_dags, score_all_dags_bge  # noqa: E402
+from src.qaoa_search import run_qaoa_search  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -334,6 +335,31 @@ def score_from_csv_bytes(
     start = time.time()
     valid_dags, edge_list = enumerate_all_dags(variables)
     scored = score_all_dags(data, valid_dags, variables, equivalent_sample_size=ess)
+    elapsed = time.time() - start
+    return data, valid_dags, edge_list, scored, elapsed
+
+
+@st.cache_data(show_spinner=False)
+def score_from_csv_bytes_bge(
+    csv_bytes: bytes,
+    variables_tuple: tuple[str, ...],
+) -> tuple[pd.DataFrame, list[tuple[str, nx.DiGraph]], list[tuple[str, str]], list[tuple[str, nx.DiGraph, float]], float]:
+    """BGe 점수 — 연속 데이터를 이산화 없이 직접 평가."""
+    raw = read_csv_bytes(csv_bytes)
+    variables = list(variables_tuple)
+    validate_selected_variables(raw, variables)
+    data = raw[variables].copy()
+    data = data.replace([np.inf, -np.inf], np.nan).dropna(subset=variables)
+    if len(data) < 5:
+        raise ValueError("선택한 변수들에서 결측/무한값을 제거한 뒤 분석 가능한 행이 5개 미만입니다.")
+    # BGe는 연속 데이터에 직접 적용 — 숫자가 아닌 열만 코드로 변환
+    for col in variables:
+        if not pd.api.types.is_numeric_dtype(data[col]):
+            data[col] = data[col].astype("string").astype("category").cat.codes.astype(float)
+    data = data.reset_index(drop=True)
+    start = time.time()
+    valid_dags, edge_list = enumerate_all_dags(variables)
+    scored = score_all_dags_bge(data, valid_dags, variables)
     elapsed = time.time() - start
     return data, valid_dags, edge_list, scored, elapsed
 
@@ -1966,10 +1992,17 @@ if data_mode == "내장 데이터셋":
         ground_truth_edges = parse_edge_text(custom_edge_text)
 
 st.sidebar.divider()
-ess = int(st.sidebar.slider("BDeu ESS", min_value=1, max_value=50, value=10))
+scoring_method = st.sidebar.radio(
+    "점수 함수",
+    ["BDeu (이산)", "BGe (연속)"],
+    horizontal=True,
+    help="BDeu: 이산 데이터에 최적. BGe: 연속 데이터를 이산화 없이 직접 평가 (정보 손실 없음).",
+)
+use_bge = scoring_method.startswith("BGe")
+ess = int(st.sidebar.slider("BDeu ESS", min_value=1, max_value=50, value=10, disabled=use_bge))
 top_k = int(st.sidebar.slider("Grover Oracle top-k", min_value=1, max_value=20, value=6))
 shots = int(st.sidebar.slider("측정 shots", min_value=512, max_value=8192, value=4096, step=512))
-auto_discretize = st.sidebar.toggle("연속형 변수 3분위 이산화", value=True)
+auto_discretize = st.sidebar.toggle("연속형 변수 3분위 이산화", value=True, disabled=use_bge)
 
 outcome_default = variables[-1]
 if outcome_hint in variables:
@@ -2002,14 +2035,21 @@ ai_enabled = bool(groq_api_key)
 
 csv_bytes = uploaded_bytes if uploaded_bytes is not None else raw_df.to_csv(index=False).encode("utf-8")
 
-with st.spinner("DAG 후보를 열거하고 BDeu 점수를 계산하는 중입니다."):
+_scoring_label = "BGe" if use_bge else "BDeu"
+with st.spinner(f"DAG 후보를 열거하고 {_scoring_label} 점수를 계산하는 중입니다."):
     try:
-        data, valid_dags, edge_list, scored, scoring_elapsed = score_from_csv_bytes(
-            csv_bytes,
-            tuple(variables),
-            ess,
-            auto_discretize,
-        )
+        if use_bge:
+            data, valid_dags, edge_list, scored, scoring_elapsed = score_from_csv_bytes_bge(
+                csv_bytes,
+                tuple(variables),
+            )
+        else:
+            data, valid_dags, edge_list, scored, scoring_elapsed = score_from_csv_bytes(
+                csv_bytes,
+                tuple(variables),
+                ess,
+                auto_discretize,
+            )
     except ValueError as exc:
         st.error(str(exc))
         st.stop()
@@ -2091,7 +2131,7 @@ else:
 metric_cols = st.columns(5)
 metric_cols[0].metric("분석 변수", f"{len(variables)}개", ", ".join(variables))
 metric_cols[1].metric("유효 DAG", f"{len(valid_dags):,}개", f"전체 {n_total:,}개 중")
-metric_cols[2].metric("최적 구조 점수", f"{best_score:.1f}", f"BDeu (ESS={ess})")
+metric_cols[2].metric("최적 구조 점수", f"{best_score:.1f}", f"{_scoring_label}" + (f" (ESS={ess})" if not use_bge else " (연속)"))
 if best_metrics:
     metric_cols[3].metric("정답 대비 F1", f"{best_metrics['f1']:.2f}", f"SHD={best_metrics['shd']}")
 else:
@@ -2824,25 +2864,41 @@ with tabs[4]:
     if not qiskit_ok:
         st.error(f"Qiskit 또는 qiskit-aer를 불러올 수 없습니다: {qiskit_error}")
     else:
-        run_cols = st.columns([0.2, 0.2, 0.6])
+        run_cols = st.columns([0.15, 0.15, 0.2, 0.5])
         with run_cols[0]:
             run_pressed = st.button("Grover 실행", type="primary", use_container_width=True)
         with run_cols[1]:
             n_runs = int(st.number_input("Multi-run", min_value=1, max_value=10, value=3, help="여러 번 실행해서 가장 좋은 결과를 선택합니다."))
         with run_cols[2]:
+            use_penalty = st.toggle("Penalty Oracle", value=False, help="순환 DAG에 부분 위상 패널티를 적용하여 유효 DAG 측정률을 높입니다.")
+        with run_cols[3]:
+            _penalty_note = " + Penalty Oracle (순환 DAG 억제)" if use_penalty else ""
             st.markdown(
-                f"<p class='small-note'>반복 {grover_iteration_count(n_edges, top_k_effective)}회 x {n_runs} runs. "
+                f"<p class='small-note'>반복 {grover_iteration_count(n_edges, top_k_effective)}회 x {n_runs} runs{_penalty_note}. "
                 "여러 번 실행하면 측정 분산을 줄여 더 안정적인 결과를 얻습니다.</p>",
                 unsafe_allow_html=True,
             )
 
+        # cyclic bitstrings 계산 (Penalty Oracle용)
+        _cyclic_bitstrings = [
+            format(i, f"0{n_edges}b")
+            for i in range(n_total)
+            if format(i, f"0{n_edges}b") not in valid_bitstrings
+        ]
+
         if run_pressed:
-            with st.spinner(f"Aer 시뮬레이터에서 Grover 회로를 {n_runs}회 실행 중입니다."):
+            _run_label = "Penalty Oracle Grover" if use_penalty else "Grover"
+            with st.spinner(f"Aer 시뮬레이터에서 {_run_label} 회로를 {n_runs}회 실행 중입니다."):
                 best_result = None
                 best_good_prob = -1.0
                 all_run_probs = []
                 for run_i in range(n_runs):
-                    result = run_grover_search(n_edges, good_bitstrings, shots=shots)
+                    if use_penalty:
+                        result = run_grover_search_with_penalty(
+                            n_edges, good_bitstrings, _cyclic_bitstrings, shots=shots,
+                        )
+                    else:
+                        result = run_grover_search(n_edges, good_bitstrings, shots=shots)
                     enriched = enrich_grover_result(result, valid_bitstrings, scored)
                     all_run_probs.append(enriched["good_probability"])
                     if enriched["good_probability"] > best_good_prob:
@@ -2850,6 +2906,7 @@ with tabs[4]:
                         best_result = enriched
                 best_result["all_run_probs"] = all_run_probs
                 best_result["n_runs"] = n_runs
+                best_result["used_penalty"] = use_penalty
             st.session_state["grover_result"] = best_result
             st.session_state["grover_run_key"] = run_key
 
@@ -2963,19 +3020,102 @@ with tabs[4]:
     st.markdown("#### Grover vs Classical 복잡도")
     st.pyplot(plot_complexity_comparison(n_edges, top_k_effective), use_container_width=True)
 
-    with st.expander("현재 구현의 한계와 의의"):
+    with st.expander("한계점과 구현된 대안"):
         st.markdown(
             """
-            **한계점:**
-            - **Oracle 구성**: 현재 BDeu 점수를 양자 회로 내에서 직접 계산(In-circuit scoring)하지 않고, 고전적으로 계산된 상위 후보를 marked state로 사용합니다.
-            - **Valid DAG 필터링**: Grover는 전체 비트 공간($2^n$)을 탐색하므로 순환 그래프가 포함될 수 있으며, 측정 후 유효 DAG 여부를 고전적으로 확인합니다.
+            | 한계 | 설명 | 이 앱에서 구현한 대안 |
+            |---|---|---|
+            | **Pre-computed Oracle** | BDeu 점수를 고전적으로 미리 계산해서 Oracle에 하드코딩 | **QAOA 비교 실험** — 점수를 cost Hamiltonian으로 인코딩하여 사전 계산 없이 최적화하는 방향성 제시 (아래 섹션) |
+            | **순환 DAG 포함** | Grover가 전체 $2^n$ 공간을 탐색하므로 비유효 DAG도 측정됨 | **Penalty Oracle** — 순환 DAG에 부분 위상 패널티를 적용하여 유효 DAG 측정률 향상 (위 토글로 실행 가능) |
+            | **이산화 정보 손실** | 연속형 변수를 이산화하면 구조 식별력 저하 | **BGe 점수** — 연속 데이터에 직접 적용되는 Gaussian 점수 함수 (사이드바에서 선택 가능) |
+            | **Markov equivalence** | 관측 데이터만으로는 동일 조건부 독립 DAG를 구분 불가 | 현재 미해결 — 개입 데이터 확보 또는 FCI 알고리즘이 필요 (향후 과제) |
 
             **Qiskit 프로젝트의 의의:**
-            - **정식화(Formulation)**: 인과 구조 탐색이라는 비정렬 탐색 문제를 Grover 알고리즘의 구조($|s\\rangle \\to Oracle \\to Diffuser \\to Measure$)에 성공적으로 매핑했습니다.
-            - **확장성**: 변수 개수가 늘어날수록 전수조사($O(N)$) 대비 Grover($O(\\sqrt{N})$)의 이차 속도 향상이 더욱 뚜렷해집니다.
-            - **Qiskit 활용**: `qiskit.QuantumCircuit`을 이용해 Oracle과 Diffuser를 동적으로 구성하고 `qiskit_aer` 시뮬레이터로 검증했습니다.
+            - **정식화**: 인과 구조 탐색을 Grover ($|s\\rangle \\to Oracle \\to Diffuser \\to Measure$)에 성공적으로 매핑
+            - **확장성**: $O(N) \\to O(\\sqrt{N})$ 이차 속도 향상, 변수가 늘수록 이점 확대
+            - **대안 시연**: Penalty Oracle과 QAOA를 통해 한계를 인식하고 개선 방향을 실제 코드로 시연
             """
         )
+
+    # ── QAOA 비교 실험 ──
+    st.divider()
+    st.markdown("#### QAOA 비교 실험: Pre-computed Oracle 한계의 대안")
+    st.markdown(
+        f"""
+        <div class="status-band" style="border-left-color: #7c3aed; background: linear-gradient(90deg, #f5f3ff 0%, #f8fafc 100%);">
+        Grover는 "좋은 답"을 미리 알아야(Pre-computed Oracle) 하지만,
+        <b>QAOA</b>는 점수 함수 자체를 양자 회로에 인코딩합니다.
+        BDeu 점수를 cost Hamiltonian의 위상 회전으로 매핑하고,
+        mixer 연산과 번갈아 적용하면서 파라미터를 최적화하여 고득점 DAG를 찾습니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _qaoa_cols = st.columns([0.2, 0.2, 0.6])
+    with _qaoa_cols[0]:
+        qaoa_pressed = st.button("QAOA 실행", type="primary", use_container_width=True)
+    with _qaoa_cols[1]:
+        qaoa_layers = int(st.number_input("QAOA layers (p)", min_value=1, max_value=5, value=2))
+    with _qaoa_cols[2]:
+        st.markdown(
+            f"<p class='small-note'>scored DAG {len(scored)}개의 점수를 cost operator로 인코딩, "
+            f"gamma/beta 파라미터를 grid search로 최적화합니다. p={qaoa_layers} layers.</p>",
+            unsafe_allow_html=True,
+        )
+
+    if qaoa_pressed:
+        with st.spinner(f"QAOA {qaoa_layers}-layer 회로를 실행하고 파라미터를 최적화하는 중..."):
+            _qaoa_result = run_qaoa_search(n_edges, scored, p_layers=qaoa_layers, shots=shots)
+            _qaoa_enriched = enrich_grover_result(_qaoa_result, valid_bitstrings, scored)
+            _qaoa_enriched["qaoa"] = True
+            _qaoa_enriched["p_layers"] = _qaoa_result.get("p_layers", qaoa_layers)
+            _qaoa_enriched["best_gamma"] = _qaoa_result.get("best_gamma", 0)
+            _qaoa_enriched["best_beta"] = _qaoa_result.get("best_beta", 0)
+            _qaoa_enriched["optimization_evals"] = _qaoa_result.get("optimization_evals", 0)
+            _qaoa_enriched["best_expectation"] = _qaoa_result.get("best_expectation", 0)
+        st.session_state["qaoa_result"] = _qaoa_enriched
+        st.session_state["qaoa_run_key"] = run_key
+
+    _qaoa_r = st.session_state.get("qaoa_result")
+    if _qaoa_r is not None and st.session_state.get("qaoa_run_key") == run_key:
+        _qaoa_graph = bitstring_to_dag(_qaoa_r["selected_bitstring"], edge_list)
+        _qaoa_metrics = graph_metrics(ground_truth if has_ground_truth else None, _qaoa_graph)
+
+        qaoa_metric_cols = st.columns(6)
+        qaoa_metric_cols[0].metric("QAOA Layers", _qaoa_r.get("p_layers", "?"))
+        qaoa_metric_cols[1].metric("Oracle 적중률", f"{_qaoa_r['good_probability']*100:.1f}%")
+        qaoa_metric_cols[2].metric("유효 DAG 측정률", f"{_qaoa_r['valid_probability']*100:.1f}%")
+        qaoa_metric_cols[3].metric("선택 DAG 순위", _qaoa_r.get("selected_rank") or "N/A")
+        qaoa_metric_cols[4].metric("회로 깊이", _qaoa_r["circuit_depth"])
+        qaoa_metric_cols[5].metric("최적화 평가 횟수", _qaoa_r.get("optimization_evals", "?"))
+
+        st.pyplot(plot_grover_counts(_qaoa_r["counts"], good_bitstrings, valid_bitstrings), use_container_width=True)
+
+        # Grover vs QAOA 비교 테이블
+        _grover_for_compare = st.session_state.get("grover_result")
+        if _grover_for_compare is not None and st.session_state.get("grover_run_key") == run_key:
+            st.markdown("##### Grover vs QAOA 직접 비교")
+            _compare_data = {
+                "항목": ["알고리즘", "Oracle 적중률", "유효 DAG 측정률", "선택 DAG 순위", "회로 깊이", "실행 시간"],
+                "Grover": [
+                    "Penalty Oracle" if _grover_for_compare.get("used_penalty") else "Standard",
+                    f"{_grover_for_compare['good_probability']*100:.1f}%",
+                    f"{_grover_for_compare['valid_probability']*100:.1f}%",
+                    str(_grover_for_compare.get("selected_rank", "N/A")),
+                    str(_grover_for_compare["circuit_depth"]),
+                    f"{_grover_for_compare['elapsed_time']:.3f}s",
+                ],
+                "QAOA": [
+                    f"p={_qaoa_r.get('p_layers', '?')} layers",
+                    f"{_qaoa_r['good_probability']*100:.1f}%",
+                    f"{_qaoa_r['valid_probability']*100:.1f}%",
+                    str(_qaoa_r.get("selected_rank", "N/A")),
+                    str(_qaoa_r["circuit_depth"]),
+                    f"{_qaoa_r['elapsed_time']:.3f}s",
+                ],
+            }
+            st.dataframe(pd.DataFrame(_compare_data), use_container_width=True, hide_index=True)
 
     # ── 핵심 발견 & 다음 단계 ──
     _grover_done = st.session_state.get("grover_result") is not None and st.session_state.get("grover_run_key") == run_key
