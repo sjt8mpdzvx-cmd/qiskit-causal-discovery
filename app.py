@@ -96,6 +96,18 @@ try:
 except ImportError:
     run_qaoa_search = None
 
+try:
+    from src.scoring import precompute_local_scores, score_bitstring_from_local  # noqa: E402
+    from src.qaoa_search import run_qaoa_local_search  # noqa: E402
+    from src.grover_search import run_grover_incircuit  # noqa: E402
+    _LOCAL_DECOMP_AVAILABLE = True
+except ImportError:
+    _LOCAL_DECOMP_AVAILABLE = False
+    precompute_local_scores = None
+    score_bitstring_from_local = None
+    run_qaoa_local_search = None
+    run_grover_incircuit = None
+
 
 @dataclass(frozen=True)
 class DatasetSpec:
@@ -2429,18 +2441,22 @@ with tabs[0]:
     with process_cols[1]:
         with st.expander("프로젝트의 의의와 한계", expanded=True):
             st.markdown(
-                """
+                f"""
                 **의의**: 양자 컴퓨팅 수업에서 학습한 Grover 알고리즘을
                 실제 데이터 과학의 난제인 인과 추론에 접목했습니다.
                 이론적 회로를 넘어, **현실의 의사결정 문제를 양자 알고리즘에
                 맞게 정식화(Formulation)하는 과정** 자체가 핵심 기여입니다.
 
-                **현재 한계**: Oracle 내에서 BDeu 점수를 직접 계산하지 않고
-                고전적으로 미리 계산한 결과를 사용합니다(Pre-computed Oracle).
+                **핵심 해결**: BDeu 점수의 분해 가능성(decomposability)을 활용하여
+                Pre-computed Oracle의 순환논리를 해소했습니다.
+                - **Local Score Decomposition**: 전수조사({2**n_edges}개) 대신
+                  로컬 점수({len(variables) * 2**(len(variables)-1)}개)만 사전 계산
+                - **In-circuit Score Evaluation**: QFT 가산기로 Oracle 안에서
+                  점수를 직접 계산하는 회로 구현 (ancilla 레지스터 활용)
+                - **QAOA Local**: 전수조사 없이 로컬 점수만으로 cost operator 구성
 
-                **향후 전망**: In-circuit Scoring — Oracle 안에서
-                점수를 양자적으로 계산하는 구조가 구현되면, 변수가 많은
-                실제 문제에서 진정한 양자 이점을 실현할 수 있습니다.
+                **남은 한계**: 시뮬레이터 실행(실제 양자 속도 향상 없음),
+                Markov equivalence(관측 데이터만으로 구분 불가).
                 """
             )
 
@@ -3037,102 +3053,151 @@ with tabs[4]:
     st.markdown("#### Grover vs Classical 복잡도")
     st.pyplot(plot_complexity_comparison(n_edges, top_k_effective), use_container_width=True)
 
-    with st.expander("한계점과 구현된 대안"):
-        st.markdown(
-            """
-            | 한계 | 설명 | 이 앱에서 구현한 대안 |
-            |---|---|---|
-            | **Pre-computed Oracle** | BDeu 점수를 고전적으로 미리 계산해서 Oracle에 하드코딩 | **QAOA 비교 실험** — 점수를 cost Hamiltonian으로 인코딩하여 사전 계산 없이 최적화하는 방향성 제시 (아래 섹션) |
-            | **순환 DAG 포함** | Grover가 전체 $2^n$ 공간을 탐색하므로 비유효 DAG도 측정됨 | **Penalty Oracle** — 순환 DAG에 부분 위상 패널티를 적용하여 유효 DAG 측정률 향상 (위 토글로 실행 가능) |
-            | **이산화 정보 손실** | 연속형 변수를 이산화하면 구조 식별력 저하 | **BGe 점수** — 연속 데이터에 직접 적용되는 Gaussian 점수 함수 (사이드바에서 선택 가능) |
-            | **Markov equivalence** | 관측 데이터만으로는 동일 조건부 독립 DAG를 구분 불가 | 현재 미해결 — 개입 데이터 확보 또는 FCI 알고리즘이 필요 (향후 과제) |
-
-            **Qiskit 프로젝트의 의의:**
-            - **정식화**: 인과 구조 탐색을 Grover ($|s\\rangle \\to Oracle \\to Diffuser \\to Measure$)에 성공적으로 매핑
-            - **확장성**: $O(N) \\to O(\\sqrt{N})$ 이차 속도 향상, 변수가 늘수록 이점 확대
-            - **대안 시연**: Penalty Oracle과 QAOA를 통해 한계를 인식하고 개선 방향을 실제 코드로 시연
-            """
-        )
-
-    # ── QAOA 비교 실험 ──
+    # ── 로컬 점수 분해: 전수조사 없는 양자 탐색 ──
     st.divider()
-    st.markdown("#### QAOA 비교 실험: Pre-computed Oracle 한계의 대안")
+    st.markdown("#### Local Score Decomposition — 순환논리 해결")
+    _n_local = len(variables) * 2 ** (len(variables) - 1)
+    _n_full = 2 ** n_edges
     st.markdown(
         f"""
-        <div class="status-band" style="border-left-color: #7c3aed; background: linear-gradient(90deg, #f5f3ff 0%, #f8fafc 100%);">
-        Grover는 "좋은 답"을 미리 알아야(Pre-computed Oracle) 하지만,
-        <b>QAOA</b>는 점수 함수 자체를 양자 회로에 인코딩합니다.
-        BDeu 점수를 cost Hamiltonian의 위상 회전으로 매핑하고,
-        mixer 연산과 번갈아 적용하면서 파라미터를 최적화하여 고득점 DAG를 찾습니다.
+        <div class="status-band" style="border-left-color: #dc2626; background: linear-gradient(90deg, #fef2f2 0%, #f8fafc 100%);">
+        <b>기존 문제</b>: 위 Grover/QAOA는 모든 DAG를 고전적으로 전수조사({_n_full}개)한 뒤 결과를 Oracle에 하드코딩합니다.
+        <b>답을 이미 안 뒤 탐색</b>하는 셈이므로, 양자 속도 향상이 실질적으로 무의미합니다.<br><br>
+        <b>해결</b>: BDeu 점수는 <b>분해 가능</b>합니다 — <code>Score(DAG) = Σ LocalScore(node, Parents)</code>.<br>
+        각 노드의 로컬 점수만 사전 계산하면(<b>{_n_local}개</b>, 전수조사 {_n_full}의 <b>{_n_local}/{_n_full}</b>),
+        양자 회로가 나머지 탐색을 수행합니다. 5변수 시 80 vs 1,048,576 — <b>13,000배 감소</b>.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    _qaoa_cols = st.columns([0.2, 0.2, 0.6])
-    with _qaoa_cols[0]:
-        qaoa_pressed = st.button("QAOA 실행", type="primary", use_container_width=True)
-    with _qaoa_cols[1]:
-        qaoa_layers = int(st.number_input("QAOA layers (p)", min_value=1, max_value=5, value=2))
-    with _qaoa_cols[2]:
+    if _LOCAL_DECOMP_AVAILABLE:
+        # 로컬 점수 사전 계산
+        _local_scores = precompute_local_scores(data, variables, edge_list, ess if not use_bge else 10)
+
+        with st.expander(f"로컬 점수 테이블 ({_n_local}개 항목)", expanded=False):
+            _ls_rows = []
+            for (node, parents), score in sorted(_local_scores.items(), key=lambda x: (x[0][0], len(x[0][1]))):
+                _ls_rows.append({
+                    "노드": node,
+                    "부모": ", ".join(sorted(parents)) if parents else "(없음)",
+                    "로컬 BDeu": f"{score:.2f}",
+                })
+            st.dataframe(pd.DataFrame(_ls_rows), use_container_width=True, hide_index=True)
+            st.caption(f"사전 계산 항목: {_n_local}개 — 전수조사({_n_full}개) 대비 {_n_full/_n_local:.0f}배 감소")
+
+        _local_cols = st.columns(2)
+
+        # ── QAOA Local ──
+        with _local_cols[0]:
+            st.markdown("##### QAOA (Local Decomposition)")
+            st.caption(f"Cost operator: {_n_local}개 로컬 항 (전수조사 {_n_full}개 → 불필요)")
+            _qaoa_local_cols = st.columns([0.5, 0.5])
+            with _qaoa_local_cols[0]:
+                _ql_pressed = st.button("QAOA-Local 실행", type="primary", use_container_width=True, key="qaoa_local_btn")
+            with _qaoa_local_cols[1]:
+                _ql_layers = int(st.number_input("layers", min_value=1, max_value=5, value=2, key="ql_layers"))
+
+            if _ql_pressed:
+                with st.spinner("QAOA Local Search 실행 중 (전수조사 없음)..."):
+                    _ql_result = run_qaoa_local_search(
+                        n_edges, edge_list, variables, _local_scores,
+                        p_layers=_ql_layers, shots=shots, n_optimization_steps=16,
+                    )
+                    _ql_enriched = enrich_grover_result(_ql_result, valid_bitstrings, scored)
+                    _ql_enriched["local_decomposition"] = True
+                    _ql_enriched["n_local_terms"] = _ql_result.get("n_local_terms", _n_local)
+                st.session_state["qaoa_local_result"] = _ql_enriched
+                st.session_state["qaoa_local_run_key"] = run_key
+
+            _ql_r = st.session_state.get("qaoa_local_result")
+            if _ql_r is not None and st.session_state.get("qaoa_local_run_key") == run_key:
+                st.metric("Oracle 적중률", f"{_ql_r['good_probability']*100:.1f}%")
+                st.metric("유효 DAG 측정률", f"{_ql_r['valid_probability']*100:.1f}%")
+                st.metric("회로 깊이", _ql_r["circuit_depth"])
+                st.caption(f"Cost operator 항: {_ql_r.get('n_local_terms', '?')} (전수조사 불필요)")
+
+        # ── Grover In-circuit ──
+        with _local_cols[1]:
+            st.markdown("##### Grover (In-circuit Oracle)")
+            st.caption("QFT Adder로 ancilla에 점수 누적 → threshold 비교 → 위상 반전")
+            _gi_cols = st.columns([0.5, 0.5])
+            with _gi_cols[0]:
+                _gi_pressed = st.button("In-circuit Grover 실행", type="primary", use_container_width=True, key="grover_incircuit_btn")
+            with _gi_cols[1]:
+                _gi_threshold = st.slider("Threshold 비율", 0.3, 0.95, 0.7, 0.05, key="gi_threshold")
+
+            if _gi_pressed:
+                with st.spinner("In-circuit Grover 실행 중 (전수조사 없음)..."):
+                    _gi_result = run_grover_incircuit(
+                        n_edges, edge_list, variables, _local_scores,
+                        threshold_ratio=_gi_threshold, n_score_bits=8, shots=shots,
+                    )
+                    _gi_enriched = enrich_grover_result(_gi_result, valid_bitstrings, scored)
+                    _gi_enriched["incircuit_oracle"] = True
+                st.session_state["grover_incircuit_result"] = _gi_enriched
+                st.session_state["grover_incircuit_run_key"] = run_key
+
+            _gi_r = st.session_state.get("grover_incircuit_result")
+            if _gi_r is not None and st.session_state.get("grover_incircuit_run_key") == run_key:
+                st.metric("Good 확률", f"{_gi_r['good_probability']*100:.1f}%")
+                st.metric("유효 DAG 측정률", f"{_gi_r['valid_probability']*100:.1f}%")
+                st.metric("총 큐비트", f"{_gi_r.get('n_total_qubits', '?')} (엣지{n_edges}+점수8+flag1)")
+                st.caption(f"회로 깊이: {_gi_r['circuit_depth']} — Pre-computed 답 없이 회로 내 점수 평가")
+
+        # ── 3-way 비교 테이블 ──
+        _grover_pre = st.session_state.get("grover_result")
+        _has_grover_pre = _grover_pre is not None and st.session_state.get("grover_run_key") == run_key
+        _has_ql = _ql_r is not None and st.session_state.get("qaoa_local_run_key") == run_key
+        _has_gi = _gi_r is not None and st.session_state.get("grover_incircuit_run_key") == run_key
+
+        if _has_grover_pre and (_has_ql or _has_gi):
+            st.markdown("##### Pre-computed vs Local Decomposition 비교")
+            _cmp = {"항목": [
+                "Oracle 구성", "고전 사전 계산", "Oracle 적중률", "유효 DAG 측정률",
+                "회로 깊이", "실행 시간",
+            ]}
+            _cmp["Grover (Pre-computed)"] = [
+                f"상위 {top_k_effective}개 하드코딩",
+                f"**{_n_full}개** 전수조사",
+                f"{_grover_pre['good_probability']*100:.1f}%",
+                f"{_grover_pre['valid_probability']*100:.1f}%",
+                str(_grover_pre["circuit_depth"]),
+                f"{_grover_pre['elapsed_time']:.3f}s",
+            ]
+            if _has_ql:
+                _cmp["QAOA-Local"] = [
+                    f"로컬 점수 {_n_local}항 인코딩",
+                    f"**{_n_local}개** 로컬 점수",
+                    f"{_ql_r['good_probability']*100:.1f}%",
+                    f"{_ql_r['valid_probability']*100:.1f}%",
+                    str(_ql_r["circuit_depth"]),
+                    f"{_ql_r['elapsed_time']:.3f}s",
+                ]
+            if _has_gi:
+                _cmp["Grover (In-circuit)"] = [
+                    "회로 내 QFT 가산+비교",
+                    f"**{_n_local}개** 로컬 점수",
+                    f"{_gi_r['good_probability']*100:.1f}%",
+                    f"{_gi_r['valid_probability']*100:.1f}%",
+                    str(_gi_r["circuit_depth"]),
+                    f"{_gi_r['elapsed_time']:.3f}s",
+                ]
+            st.dataframe(pd.DataFrame(_cmp), use_container_width=True, hide_index=True)
+
+    with st.expander("한계점 정리와 해결 현황"):
         st.markdown(
-            f"<p class='small-note'>scored DAG {len(scored)}개의 점수를 cost operator로 인코딩, "
-            f"gamma/beta 파라미터를 grid search로 최적화합니다. p={qaoa_layers} layers.</p>",
-            unsafe_allow_html=True,
+            f"""
+            | 한계 | 왜 문제인가 | 해결 |
+            |---|---|---|
+            | **Pre-computed Oracle (순환논리)** | 전수조사({_n_full}개)로 답을 알고 난 뒤 양자 "탐색" — 속도 향상 무의미 | **Local Score Decomposition** — 로컬 점수 {_n_local}개만 사전 계산, 양자 회로가 나머지 탐색 수행 (위 실험) |
+            | **In-circuit 점수 평가** | Oracle이 점수를 회로 내에서 계산하지 않음 | **QFT Adder + Threshold Oracle** — ancilla 레지스터에 로컬 점수 누적, threshold 비교로 마킹 (위 In-circuit Grover) |
+            | **순환 DAG 포함** | 전체 $2^n$ 공간에 비유효 DAG 포함 | **Penalty Oracle** — 순환 DAG에 부분 위상 패널티 (위 토글) |
+            | **이산화 정보 손실** | 연속 변수 이산화 시 구조 식별력 저하 | **BGe 점수** — 연속 데이터 직접 평가 (사이드바) |
+            | **시뮬레이터** | Aer에서 2^n 진폭을 고전적으로 계산 — 실제 양자 속도 향상 없음 | 현재 하드웨어 한계, 회로 정확성 검증 목적 |
+            | **Markov equivalence** | 관측 데이터만으로 동일 조건부 독립 DAG 구분 불가 | 미해결 — 개입 데이터 또는 FCI 필요 |
+            """
         )
-
-    if qaoa_pressed and run_qaoa_search is not None:
-        with st.spinner(f"QAOA {qaoa_layers}-layer 회로를 실행하고 파라미터를 최적화하는 중..."):
-            _qaoa_result = run_qaoa_search(n_edges, scored, p_layers=qaoa_layers, shots=shots)
-            _qaoa_enriched = enrich_grover_result(_qaoa_result, valid_bitstrings, scored)
-            _qaoa_enriched["qaoa"] = True
-            _qaoa_enriched["p_layers"] = _qaoa_result.get("p_layers", qaoa_layers)
-            _qaoa_enriched["best_gamma"] = _qaoa_result.get("best_gamma", 0)
-            _qaoa_enriched["best_beta"] = _qaoa_result.get("best_beta", 0)
-            _qaoa_enriched["optimization_evals"] = _qaoa_result.get("optimization_evals", 0)
-            _qaoa_enriched["best_expectation"] = _qaoa_result.get("best_expectation", 0)
-        st.session_state["qaoa_result"] = _qaoa_enriched
-        st.session_state["qaoa_run_key"] = run_key
-
-    _qaoa_r = st.session_state.get("qaoa_result")
-    if _qaoa_r is not None and st.session_state.get("qaoa_run_key") == run_key:
-        _qaoa_graph = bitstring_to_dag(_qaoa_r["selected_bitstring"], edge_list)
-        _qaoa_metrics = graph_metrics(ground_truth if has_ground_truth else None, _qaoa_graph)
-
-        qaoa_metric_cols = st.columns(6)
-        qaoa_metric_cols[0].metric("QAOA Layers", _qaoa_r.get("p_layers", "?"))
-        qaoa_metric_cols[1].metric("Oracle 적중률", f"{_qaoa_r['good_probability']*100:.1f}%")
-        qaoa_metric_cols[2].metric("유효 DAG 측정률", f"{_qaoa_r['valid_probability']*100:.1f}%")
-        qaoa_metric_cols[3].metric("선택 DAG 순위", _qaoa_r.get("selected_rank") or "N/A")
-        qaoa_metric_cols[4].metric("회로 깊이", _qaoa_r["circuit_depth"])
-        qaoa_metric_cols[5].metric("최적화 평가 횟수", _qaoa_r.get("optimization_evals", "?"))
-
-        st.pyplot(plot_grover_counts(_qaoa_r["counts"], good_bitstrings, valid_bitstrings), use_container_width=True)
-
-        # Grover vs QAOA 비교 테이블
-        _grover_for_compare = st.session_state.get("grover_result")
-        if _grover_for_compare is not None and st.session_state.get("grover_run_key") == run_key:
-            st.markdown("##### Grover vs QAOA 직접 비교")
-            _compare_data = {
-                "항목": ["알고리즘", "Oracle 적중률", "유효 DAG 측정률", "선택 DAG 순위", "회로 깊이", "실행 시간"],
-                "Grover": [
-                    "Penalty Oracle" if _grover_for_compare.get("used_penalty") else "Standard",
-                    f"{_grover_for_compare['good_probability']*100:.1f}%",
-                    f"{_grover_for_compare['valid_probability']*100:.1f}%",
-                    str(_grover_for_compare.get("selected_rank", "N/A")),
-                    str(_grover_for_compare["circuit_depth"]),
-                    f"{_grover_for_compare['elapsed_time']:.3f}s",
-                ],
-                "QAOA": [
-                    f"p={_qaoa_r.get('p_layers', '?')} layers",
-                    f"{_qaoa_r['good_probability']*100:.1f}%",
-                    f"{_qaoa_r['valid_probability']*100:.1f}%",
-                    str(_qaoa_r.get("selected_rank", "N/A")),
-                    str(_qaoa_r["circuit_depth"]),
-                    f"{_qaoa_r['elapsed_time']:.3f}s",
-                ],
-            }
-            st.dataframe(pd.DataFrame(_compare_data), use_container_width=True, hide_index=True)
 
     # ── 핵심 발견 & 다음 단계 ──
     _grover_done = st.session_state.get("grover_result") is not None and st.session_state.get("grover_run_key") == run_key

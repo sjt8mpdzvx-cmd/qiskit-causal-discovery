@@ -283,3 +283,67 @@ def score_all_dags_bge(data, valid_dags, variables, alpha_mu=1.0, alpha_w=None):
     # BGe도 높을수록 좋으므로 내림차순 정렬
     scored.sort(key=lambda x: x[2], reverse=True)
     return scored
+
+
+# ---------------------------------------------------------------------------
+# Local Score Decomposition — 다항적 사전 계산
+# ---------------------------------------------------------------------------
+
+
+def precompute_local_scores(data, variables, edge_list, equivalent_sample_size=10):
+    """모든 (노드, 부모집합) 조합의 로컬 BDeu 점수를 사전 계산.
+
+    BDeu는 분해 가능: Score(DAG) = Σ_node LocalScore(node, Parents(node)).
+    따라서 전체 DAG를 전수조사(O(2^|E|))하지 않고,
+    각 노드의 가능한 부모 조합만 평가하면 충분하다.
+
+    복잡도: O(|V| × 2^(|V|-1)) — 검색 공간 O(2^(|V|×(|V|-1))) 대비 지수적 감소.
+        3변수: 3 × 4  =  12 평가  (vs 전수조사 64)
+        4변수: 4 × 8  =  32 평가  (vs 전수조사 4,096)
+        5변수: 5 × 16 =  80 평가  (vs 전수조사 1,048,576)
+
+    Returns
+    -------
+    dict[(str, frozenset[str]), float]
+        (노드 이름, 부모 노드 집합) → 로컬 BDeu 점수
+    """
+    local_scores = {}
+    for node in variables:
+        other_vars = [v for v in variables if v != node]
+        for mask in range(2 ** len(other_vars)):
+            parents = frozenset(
+                other_vars[bit] for bit in range(len(other_vars)) if mask & (1 << bit)
+            )
+            score = compute_local_bdeu(data, node, list(parents), equivalent_sample_size)
+            local_scores[(node, parents)] = score
+    return local_scores
+
+
+def precompute_local_scores_bge(data, variables, edge_list, alpha_mu=1.0, alpha_w=None):
+    """BGe 버전의 로컬 점수 사전 계산."""
+    local_scores = {}
+    for node in variables:
+        other_vars = [v for v in variables if v != node]
+        for mask in range(2 ** len(other_vars)):
+            parents = frozenset(
+                other_vars[bit] for bit in range(len(other_vars)) if mask & (1 << bit)
+            )
+            score = compute_local_bge(data, node, list(parents), alpha_mu, alpha_w)
+            local_scores[(node, parents)] = score
+    return local_scores
+
+
+def score_bitstring_from_local(bitstring, edge_list, variables, local_scores):
+    """로컬 점수 테이블에서 비트 문자열의 DAG 점수를 계산.
+
+    데이터 접근 없이 O(|V|) 딕셔너리 룩업만으로 점수 산출.
+    """
+    total = 0.0
+    for node in variables:
+        parents = frozenset(
+            src
+            for q_idx, (src, dst) in enumerate(edge_list)
+            if dst == node and bitstring[q_idx] == "1"
+        )
+        total += local_scores.get((node, parents), -np.inf)
+    return total
