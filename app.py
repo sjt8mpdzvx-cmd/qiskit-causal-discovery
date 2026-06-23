@@ -97,13 +97,18 @@ except ImportError:
     run_qaoa_search = None
 
 try:
-    from src.scoring import precompute_local_scores, score_bitstring_from_local  # noqa: E402
+    from src.scoring import (  # noqa: E402
+        precompute_local_scores,
+        precompute_local_scores_bge,
+        score_bitstring_from_local,
+    )
     from src.qaoa_search import run_qaoa_local_search  # noqa: E402
     from src.grover_search import run_grover_incircuit  # noqa: E402
     _LOCAL_DECOMP_AVAILABLE = True
 except ImportError:
     _LOCAL_DECOMP_AVAILABLE = False
     precompute_local_scores = None
+    precompute_local_scores_bge = None
     score_bitstring_from_local = None
     run_qaoa_local_search = None
     run_grover_incircuit = None
@@ -198,6 +203,15 @@ DATASETS: dict[str, DatasetSpec] = {
         story="공중보건 기관이 심장병 발생률을 줄이려 할 때, 금연 캠페인·콜레스테롤 약·혈압 약 중 어디에 자원을 집중해야 하는지 인과 분석으로 판단하는 문제입니다.",
         outcome_higher_is_better=False,
     ),
+    "Student performance (학생 성적)": DatasetSpec(
+        file="student_performance.csv",
+        description="학생의 학습 시간, 외출 빈도, 결석과 최종 성적을 담은 교육 데이터입니다.",
+        default_vars=("StudyTime", "GoOut", "Absences", "FinalGrade"),
+        ground_truth=(),
+        outcome_hint="FinalGrade",
+        story="학습 시간·생활 습관·결석과 성적의 관계를 탐색하는 교육용 예제입니다. 알려진 정답 DAG가 없으므로 구조와 개입 결과는 가설 생성용으로만 해석합니다.",
+        outcome_higher_is_better=True,
+    ),
 }
 
 
@@ -205,6 +219,7 @@ OUTCOME_DIRECTION_DEFAULTS: dict[str, bool] = {
     # Higher is better
     "MPG": True,
     "StudyTime": True,
+    "FinalGrade": True,
     # Higher is usually worse in the built-in stories
     "Erk": False,
     "Akt": False,
@@ -305,6 +320,12 @@ def read_csv_bytes(csv_bytes: bytes) -> pd.DataFrame:
     duplicated = raw.columns[raw.columns.duplicated()].tolist()
     if duplicated:
         raise ValueError(f"중복 컬럼명이 있습니다: {', '.join(map(str, duplicated))}")
+    html_like_columns = [col for col in raw.columns if "<" in col or ">" in col]
+    if html_like_columns:
+        raise ValueError(
+            "CSV 컬럼명에는 '<' 또는 '>'를 사용할 수 없습니다. "
+            "화면 표시에 안전한 이름으로 바꾼 뒤 다시 업로드하세요."
+        )
     return raw
 
 
@@ -333,8 +354,10 @@ def discretize_for_bdeu(raw: pd.DataFrame, variables: list[str], auto_discretize
             if unique_count == 0:
                 raise ValueError(f"{col} 변수에 분석 가능한 값이 없습니다.")
             if auto_discretize and unique_count > 8:
-                ranked = series.rank(method="first")
-                data[col] = pd.qcut(ranked, q=3, labels=False, duplicates="drop")
+                # Quantile-cut the observed values directly.  Ranking with
+                # method='first' splits equal values according to row order,
+                # creating artificial categories and non-reproducible scores.
+                data[col] = pd.qcut(series, q=3, labels=False, duplicates="drop")
             else:
                 data[col] = series
         else:
@@ -378,10 +401,23 @@ def score_from_csv_bytes_bge(
     data = data.replace([np.inf, -np.inf], np.nan).dropna(subset=variables)
     if len(data) < 5:
         raise ValueError("선택한 변수들에서 결측/무한값을 제거한 뒤 분석 가능한 행이 5개 미만입니다.")
-    # BGe는 연속 데이터에 직접 적용 — 숫자가 아닌 열만 코드로 변환
-    for col in variables:
-        if not pd.api.types.is_numeric_dtype(data[col]):
-            data[col] = data[col].astype("string").astype("category").cat.codes.astype(float)
+    non_numeric = [col for col in variables if not pd.api.types.is_numeric_dtype(data[col])]
+    if non_numeric:
+        raise ValueError(
+            "BGe는 연속형 숫자 변수에만 사용할 수 있습니다. "
+            f"범주형 열({', '.join(non_numeric)})은 BDeu를 선택하세요."
+        )
+
+    # Binary/low-cardinality values are discrete even when a CSV parser reads
+    # them as numbers.  Treating their labels as Gaussian measurements makes
+    # the BGe likelihood and the resulting edge directions meaningless.
+    discrete_like = [col for col in variables if data[col].nunique(dropna=True) <= 8]
+    if discrete_like:
+        raise ValueError(
+            "BGe는 이산·범주형 변수에 사용할 수 없습니다. "
+            f"고유값이 8개 이하인 열({', '.join(discrete_like)})은 BDeu를 선택하세요."
+        )
+    data = data.astype(float)
     data = data.reset_index(drop=True)
     start = time.time()
     valid_dags, edge_list = enumerate_all_dags(variables)
@@ -564,7 +600,11 @@ def plot_correlation(data: pd.DataFrame) -> plt.Figure:
     return fig
 
 
-def plot_score_distribution(scored: list[tuple[str, nx.DiGraph, float]], good_bitstrings: list[str]) -> plt.Figure:
+def plot_score_distribution(
+    scored: list[tuple[str, nx.DiGraph, float]],
+    good_bitstrings: list[str],
+    score_label: str = "BDeu",
+) -> plt.Figure:
     scores = np.array([item[2] for item in scored])
     fig, ax = plt.subplots(figsize=(6.2, 3.8))
     fig.patch.set_facecolor("#ffffff")
@@ -577,13 +617,13 @@ def plot_score_distribution(scored: list[tuple[str, nx.DiGraph, float]], good_bi
 
     best_score = scored[0][2]
     threshold_score = scored[min(len(scored), len(good_bitstrings)) - 1][2]
-    ax.axvline(best_score, color="#6366f1", linewidth=2.5, label="Best BDeu", zorder=5)
+    ax.axvline(best_score, color="#6366f1", linewidth=2.5, label=f"Best {score_label}", zorder=5)
     ax.axvline(threshold_score, color="#f59e0b", linewidth=2.0, linestyle="--", label="Oracle threshold", zorder=5)
 
     # Shade the "good" region
     ax.axvspan(threshold_score, scores.max() + 1, alpha=0.06, color="#6366f1")
 
-    ax.set_xlabel("BDeu Score (higher is better)")
+    ax.set_xlabel(f"{score_label} Score (higher is better)")
     ax.set_ylabel("DAG count")
     ax.set_title("Score Distribution of Valid DAGs", fontsize=12, fontweight="bold", color="#0f172a")
     ax.legend(loc="upper left", framealpha=0.9)
@@ -650,6 +690,7 @@ def candidate_table(
     scored: list[tuple[str, nx.DiGraph, float]],
     reference: nx.DiGraph | None,
     top_n: int = 12,
+    score_label: str = "BDeu",
 ) -> pd.DataFrame:
     best = scored[0][2]
     rows = []
@@ -657,7 +698,7 @@ def candidate_table(
         row = {
             "rank": rank,
             "bitstring": bitstring,
-            "BDeu": round(score, 3),
+            score_label: round(score, 3),
             "gap": round(score - best, 3),
             "edges": format_edges(graph.edges()),
         }
@@ -734,6 +775,66 @@ def enrich_grover_result(
         "valid_measured_top5": valid_measured,
         "unique_valid_measured": len(valid_counts),
         "unique_total_measured": len(result["counts"]),
+    }
+
+
+def enrich_local_search_result(
+    result: dict,
+    edge_list: list[tuple[str, str]],
+    variables: list[str],
+    local_scores: dict,
+) -> dict:
+    """Summarize a local-score quantum run without exhaustive DAG scores.
+
+    This intentionally evaluates only states that were measured.  The
+    classical exhaustive table remains available elsewhere in the UI for a
+    comparison, but it must not choose or rank the local-search result.
+    """
+    measured_scores = {
+        bitstring: score_bitstring_from_local(bitstring, edge_list, variables, local_scores)
+        for bitstring in result["counts"]
+    }
+    valid_counts = {
+        bitstring: count
+        for bitstring, count in result["counts"].items()
+        if nx.is_directed_acyclic_graph(bitstring_to_dag(bitstring, edge_list))
+    }
+
+    if valid_counts:
+        valid_scores = [measured_scores[bitstring] for bitstring in valid_counts]
+        min_score, max_score = min(valid_scores), max(valid_scores)
+        score_range = max_score - min_score if max_score != min_score else 1.0
+        selected = max(
+            valid_counts,
+            key=lambda bitstring: (
+                0.6 * (measured_scores[bitstring] - min_score) / score_range
+                + 0.4 * valid_counts[bitstring] / result["shots"]
+            ),
+        )
+    else:
+        selected = result["top_bitstring"]
+
+    valid_measured = sorted(
+        (
+            (bitstring, count, measured_scores[bitstring], None)
+            for bitstring, count in valid_counts.items()
+        ),
+        key=lambda item: item[2],
+        reverse=True,
+    )[:5]
+
+    return {
+        **result,
+        "selected_bitstring": selected,
+        "selected_score": measured_scores.get(selected),
+        "selected_rank": None,
+        "selected_is_valid": selected in valid_counts,
+        "raw_top_is_valid": result["top_bitstring"] in valid_counts,
+        "valid_probability": sum(valid_counts.values()) / result["shots"],
+        "valid_measured_top5": valid_measured,
+        "unique_valid_measured": len(valid_counts),
+        "unique_total_measured": len(result["counts"]),
+        "selection_uses_local_scores": True,
     }
 
 
@@ -920,11 +1021,11 @@ def intervention_mean(
         weighted_sum += float(probability) * float(cell[outcome].mean())
         covered_weight += float(probability)
 
-    if covered_weight == 0:
-        if len(subset) == 0:
-            return baseline, 0.0, "fallback baseline"
-        return float(subset[outcome].mean()), len(subset) / len(data), "fallback conditional"
-    return weighted_sum / covered_weight, covered_weight, f"adjusted by {', '.join(parents)}"
+    if covered_weight < 1.0 - 1e-12:
+        # Renormalizing by covered_weight changes the target population.  It
+        # is not E[Y | do(X=x)], so do not use it as an intervention estimate.
+        return float("nan"), covered_weight, "positivity violation"
+    return weighted_sum, covered_weight, f"adjusted by {', '.join(parents)}"
 
 
 def intervention_table(
@@ -944,10 +1045,13 @@ def intervention_table(
         low_value, high_value = values[0], values[-1]
         y_low, low_coverage, low_note = intervention_mean(data, dag, target, outcome, low_value)
         y_high, high_coverage, high_note = intervention_mean(data, dag, target, outcome, high_value)
-        effect = y_high - y_low
+        estimable = bool(np.isfinite(y_low) and np.isfinite(y_high))
+        effect = y_high - y_low if estimable else float("nan")
         coverage = min(low_coverage, high_coverage)
 
-        if abs(effect) < 1e-9:
+        if not estimable:
+            action = "추정 불가 (positivity 위반)"
+        elif abs(effect) < 1e-9:
             action = "개입 우선순위 낮음"
         elif higher_is_better:
             # outcome을 높이고 싶다 (MPG, FinalGrade)
@@ -957,9 +1061,9 @@ def intervention_table(
             action = f"{target} 억제" if effect > 0 else f"{target} 활성화"
 
         coverage_note = ""
-        if coverage < 0.5:
+        if estimable and coverage < 0.5:
             coverage_note = " (coverage 부족)"
-        reliability, _, _ = coverage_confidence(float(coverage))
+        reliability = coverage_confidence(float(coverage))[0] if estimable else "추정 불가"
 
         rows.append(
             {
@@ -978,11 +1082,19 @@ def intervention_table(
     table = pd.DataFrame(rows)
     if table.empty:
         return table
-    return table.sort_values("effect_high_minus_low", key=lambda col: col.abs(), ascending=False).reset_index(drop=True)
+    return table.sort_values(
+        "effect_high_minus_low",
+        key=lambda col: col.abs(),
+        ascending=False,
+        na_position="last",
+    ).reset_index(drop=True)
 
 
 def has_actionable_intervention(table: pd.DataFrame, eps: float = 1e-9) -> bool:
-    return not table.empty and float(table["effect_high_minus_low"].abs().max()) > eps
+    if table.empty:
+        return False
+    effects = pd.to_numeric(table["effect_high_minus_low"], errors="coerce").dropna()
+    return not effects.empty and float(effects.abs().max()) > eps
 
 
 def plot_interventions(table: pd.DataFrame) -> plt.Figure:
@@ -990,8 +1102,23 @@ def plot_interventions(table: pd.DataFrame) -> plt.Figure:
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#fafbfc")
 
-    values = table["effect_high_minus_low"].to_numpy()
-    targets = table["target"].to_list()
+    estimable = table[np.isfinite(pd.to_numeric(table["effect_high_minus_low"], errors="coerce"))]
+    if estimable.empty:
+        ax.text(
+            0.5,
+            0.5,
+            "Positivity 위반으로 추정 가능한 개입 효과가 없습니다.",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            color="#64748b",
+        )
+        ax.axis("off")
+        fig.tight_layout()
+        return fig
+
+    values = estimable["effect_high_minus_low"].to_numpy()
+    targets = estimable["target"].to_list()
     colors = ["#ef4444" if v > 0 else "#6366f1" if v < 0 else "#cbd5e1" for v in values]
 
     bars = ax.barh(
@@ -1001,8 +1128,9 @@ def plot_interventions(table: pd.DataFrame) -> plt.Figure:
     ax.axvline(0, color="#334155", linewidth=1.2, zorder=2)
 
     # Value labels
+    value_scale = max(float(np.max(np.abs(values))), 1e-12)
     for bar, val in zip(bars, values):
-        label_x = val + (max(abs(values)) * 0.03 if val >= 0 else -max(abs(values)) * 0.03)
+        label_x = val + (value_scale * 0.03 if val >= 0 else -value_scale * 0.03)
         ha = "left" if val >= 0 else "right"
         ax.text(label_x, bar.get_y() + bar.get_height() / 2, f"{val:.3f}", ha=ha, va="center", fontsize=9, fontweight="bold", color="#334155")
 
@@ -1133,7 +1261,11 @@ def plot_complexity_comparison(n_edges: int, top_k: int) -> plt.Figure:
     return fig
 
 
-def plot_score_landscape(scored: list[tuple[str, nx.DiGraph, float]], top_k: int) -> plt.Figure:
+def plot_score_landscape(
+    scored: list[tuple[str, nx.DiGraph, float]],
+    top_k: int,
+    score_label: str = "BDeu",
+) -> plt.Figure:
     """DAG score landscape를 rank-score 곡선으로 시각화."""
     fig, ax = plt.subplots(figsize=(7, 3.5))
     fig.patch.set_facecolor("#ffffff")
@@ -1150,8 +1282,8 @@ def plot_score_landscape(scored: list[tuple[str, nx.DiGraph, float]], top_k: int
     ax.axhline(scores[min(top_k, len(scores)) - 1], color="#f59e0b", linewidth=1.5, linestyle="--", alpha=0.7, label="Oracle threshold")
 
     ax.set_xlabel("DAG rank")
-    ax.set_ylabel("BDeu Score")
-    ax.set_title("Score Landscape: BDeu by Rank", fontsize=12, fontweight="bold", color="#0f172a")
+    ax.set_ylabel(f"{score_label} Score")
+    ax.set_title(f"Score Landscape: {score_label} by Rank", fontsize=12, fontweight="bold", color="#0f172a")
     ax.legend(fontsize=8)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -2103,7 +2235,19 @@ good_bitstrings = [scored[idx][0] for idx in range(top_k_effective)]
 
 best_bitstring, best_graph, best_score = scored[0]
 best_metrics = graph_metrics(ground_truth if has_ground_truth else None, best_graph)
-run_key = f"{dataset_name}|{','.join(variables)}|{ess}|{top_k}|{shots}|{auto_discretize}|{len(data)}"
+data_digest = hashlib.sha256(csv_bytes).hexdigest()[:16]
+run_key = "|".join(
+    [
+        "analysis-v2",
+        data_digest,
+        _scoring_label,
+        ",".join(variables),
+        str(ess if not use_bge else "n/a"),
+        str(auto_discretize),
+        str(top_k),
+        str(shots),
+    ]
+)
 
 st.markdown(
     f"""
@@ -2255,7 +2399,7 @@ with tabs[0]:
                 <div class="step-title">구조 탐색</div>
                 <div class="step-desc">
                     {n_total:,}개 후보 중 유효한 {len(valid_dags):,}개를
-                    BDeu 점수로 평가해 최적 DAG를 찾습니다.
+                    {_scoring_label} 점수로 평가해 최적 DAG를 찾습니다.
                 </div>
             </div>
             <div class="step-card">
@@ -2308,19 +2452,28 @@ with tabs[0]:
                 **→ [인과 구조 발견] 탭**에서 데이터가 가장 지지하는 DAG를 찾습니다.
                 """
             )
-        with st.expander("BDeu 점수"):
-            st.markdown(
-                f"""
-                **Bayesian Dirichlet equivalent uniform Score** — 특정 DAG 구조가 관측 데이터에
-                얼마나 잘 맞는지 측정하는 점수입니다.
+        with st.expander(f"점수 함수 ({_scoring_label})"):
+            if use_bge:
+                st.markdown(
+                    f"""
+                    **Bayesian Gaussian equivalent Score** — 연속형 수치 데이터에서 DAG 구조의 적합도를 비교합니다.
 
-                - 점수가 높을수록 "이 인과 구조가 데이터를 잘 설명한다"
-                - ESS(Equivalent Sample Size) 파라미터로 사전분포 강도 조절 (현재 ESS={ess})
-                - 현재 최고 점수: **{best_score:.1f}**
+                    - 이산화하지 않은 연속값을 사용하며, 연속형 가우시안 가정을 전제로 합니다.
+                    - 이산·범주형 변수는 BGe가 아니라 BDeu로 분석해야 합니다.
+                    - 현재 최고 점수: **{best_score:.1f}**
+                    """
+                )
+            else:
+                st.markdown(
+                    f"""
+                    **Bayesian Dirichlet equivalent uniform Score** — 특정 DAG 구조가 관측 데이터에
+                    얼마나 잘 맞는지 측정하는 점수입니다.
 
-                **→ [인과 구조 발견] 탭**에서 점수 분포를 확인하고 상위 DAG를 비교합니다.
-                """
-            )
+                    - 점수가 높을수록 "이 인과 구조가 데이터를 잘 설명한다"
+                    - ESS(Equivalent Sample Size) 파라미터로 사전분포 강도 조절 (현재 ESS={ess})
+                    - 현재 최고 점수: **{best_score:.1f}**
+                    """
+                )
         with st.expander("do-calculus / Backdoor Adjustment"):
             st.markdown(
                 f"""
@@ -2365,7 +2518,7 @@ with tabs[0]:
                 f"""
                 Grover 회로에서 **"이 상태가 정답인가?"를 판별하는 양자 게이트**입니다.
 
-                - 이 앱에서는 BDeu 점수 **상위 {top_k_effective}개** DAG를 "좋은 답"으로 표시
+                - 이 앱에서는 {_scoring_label} 점수 **상위 {top_k_effective}개** DAG를 "좋은 답"으로 표시
                 - Oracle이 표시한 상태의 진폭이 Diffuser를 통해 증폭됨
                 - 현재 한계: 점수 계산 자체는 고전적으로 수행 후 결과를 Oracle에 하드코딩
                   (향후 In-circuit Scoring으로 발전 가능)
@@ -2391,7 +2544,7 @@ with tabs[0]:
             </p>
             <ul style="margin:0.5rem 0; padding-left:1.3rem;">
                 <li><b>인코딩</b>: {n_edges}개 엣지 후보 각각을 큐비트 1개로 매핑 → <b>{n_edges}큐비트</b> 회로</li>
-                <li><b>Oracle</b>: BDeu 상위 {top_k_effective}개 DAG를 marked state로 설정</li>
+                <li><b>Oracle</b>: {_scoring_label} 상위 {top_k_effective}개 DAG를 marked state로 설정</li>
                 <li><b>증폭</b>: Grover 반복을 통해 고득점 구조의 측정 확률을 유의미하게 높임</li>
                 <li><b>의의</b>: 전수조사 <code>O({n_total:,})</code> → Grover <code>O({int(math.sqrt(n_total))})</code> 이차 속도 향상 시연</li>
             </ul>
@@ -2447,7 +2600,7 @@ with tabs[0]:
                 이론적 회로를 넘어, **현실의 의사결정 문제를 양자 알고리즘에
                 맞게 정식화(Formulation)하는 과정** 자체가 핵심 기여입니다.
 
-                **핵심 해결**: BDeu 점수의 분해 가능성(decomposability)을 활용하여
+                **핵심 해결**: 분해 가능한 구조 점수({_scoring_label})를 활용하여
                 Pre-computed Oracle의 순환논리를 해소했습니다.
                 - **Local Score Decomposition**: 전수조사({2**n_edges}개) 대신
                   로컬 점수({len(variables) * 2**(len(variables)-1)}개)만 사전 계산
@@ -2553,7 +2706,7 @@ with tabs[1]:
         <div class="nextstep-card">
             <div class="nextstep-label">다음 단계 →  인과 구조 발견</div>
             <div class="nextstep-body">
-            다음 탭에서는 {n_total:,}개의 가능한 DAG 후보 중 데이터에 가장 부합하는 구조를 <b>BDeu 점수</b>로 자동 탐색합니다.
+            다음 탭에서는 {n_total:,}개의 가능한 DAG 후보 중 데이터에 가장 부합하는 구조를 <b>{_scoring_label} 점수</b>로 자동 탐색합니다.
             {f'문헌의 정답 구조와 비교하여 발견 정확도도 평가합니다.' if has_ground_truth else ''}
             </div>
         </div>
@@ -2573,7 +2726,7 @@ with tabs[2]:
         <div class="status-band">
         앞서 상관관계만으로는 인과를 알 수 없다는 것을 확인했습니다.
         이제 <b>{', '.join(variables)}</b> 사이에 가능한 인과 화살표 {n_edges}개로 구성되는 DAG 후보 <b>{n_total:,}개</b>를 전수 평가합니다.<br>
-        각 DAG에 <b>BDeu 점수</b>(데이터와의 적합도)를 매겨, 관측 데이터를 가장 잘 설명하는 인과 구조를 찾습니다.
+        각 DAG에 <b>{_scoring_label} 점수</b>(데이터와의 적합도)를 매겨, 관측 데이터를 가장 잘 설명하는 인과 구조를 찾습니다.
         점수가 높을수록 "이 인과 관계가 데이터에 의해 지지된다"는 뜻입니다.
         </div>
         """,
@@ -2593,11 +2746,11 @@ with tabs[2]:
         if best_metrics:
             subtitle = f"SHD={best_metrics['shd']}, F1={best_metrics['f1']:.2f}"
         st.pyplot(
-            draw_dag(best_graph, variables, "Best DAG by BDeu", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
+            draw_dag(best_graph, variables, f"Best DAG by {_scoring_label}", reference=ground_truth if has_ground_truth else None, subtitle=subtitle),
             use_container_width=True,
         )
     with graph_cols[-1]:
-        st.pyplot(plot_score_distribution(scored, good_bitstrings), use_container_width=True)
+        st.pyplot(plot_score_distribution(scored, good_bitstrings, _scoring_label), use_container_width=True)
 
     if has_ground_truth and best_metrics:
         st.pyplot(plot_shd_explanation(ground_truth, best_graph, variables), use_container_width=True)
@@ -2605,27 +2758,36 @@ with tabs[2]:
     st.divider()
 
     st.markdown("#### 상위 DAG 후보")
-    st.dataframe(candidate_table(scored, ground_truth if has_ground_truth else None), use_container_width=True, hide_index=True)
+    st.dataframe(
+        candidate_table(scored, ground_truth if has_ground_truth else None, score_label=_scoring_label),
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    with st.expander("BDeu 점수와 구조 학습의 한계"):
-        st.markdown(
-            f"""
-            **BDeu (Bayesian Dirichlet equivalent uniform)** 는 이산 베이지안 네트워크의 구조 점수입니다.
-            각 노드별로 부모-자식 조건부 분포의 marginal likelihood를 계산하고 합산합니다. 높을수록 데이터에 더 잘 맞습니다.
+    with st.expander(f"{_scoring_label} 점수와 구조 학습의 한계"):
+        if use_bge:
+            st.markdown(
+                f"""
+                **BGe (Bayesian Gaussian equivalent)** 는 연속형 가우시안 베이지안 네트워크의 구조 점수입니다.
+                선택한 모든 열이 연속형 숫자 변수인지 확인한 뒤, 이산화 없이 주변우도를 비교합니다.
 
-            - **ESS (Equivalent Sample Size)** = {ess}: 사전분포의 강도. 작을수록 데이터에 충실하고 희소한 구조를 선호합니다.
-            - 현재 1위 BDeu = **{scored[0][2]:.2f}**, 유효 DAG {len(valid_dags):,}개 중 최고점입니다.
+                - 현재 1위 BGe = **{scored[0][2]:.2f}**, 유효 DAG {len(valid_dags):,}개 중 최고점입니다.
+                - 이산·범주형 변수, 순서형 코드, 저카디널리티 수치는 BGe에 넣지 않고 BDeu를 사용해야 합니다.
+                - BGe를 선택해도 관측 데이터만으로 Markov equivalence나 숨은 교란변수를 해결할 수는 없습니다.
+                """
+            )
+        else:
+            st.markdown(
+                f"""
+                **BDeu (Bayesian Dirichlet equivalent uniform)** 는 이산 베이지안 네트워크의 구조 점수입니다.
+                각 노드별로 부모-자식 조건부 분포의 marginal likelihood를 계산하고 합산합니다. 높을수록 데이터에 더 잘 맞습니다.
 
-            **왜 정답과 다를 수 있는가?**
-            - **Markov equivalence**: 관측 데이터만으로는 동일한 조건부 독립 관계를 만드는 여러 DAG를 구분할 수 없습니다 (예: A→B와 A←B는 주변 분포가 같을 수 있음).
-            - **변수 부분 선택**: 전체 네트워크의 일부 변수만 분석하면, 숨은 매개변수/교란변수 효과로 방향이 바뀔 수 있습니다.
-            - **이산화**: 연속형 변수를 이산화하면 정보가 손실되어 구조 식별력이 떨어집니다.
-            - F1이 낮더라도 **상위 DAG 다수가 비슷한 방향성을 공유**하면, 개입 추천의 방향 자체는 신뢰할 수 있습니다.
-
-            **핵심 한계 문장**: 이 앱은 관측 데이터만으로 완전한 인과관계를 증명하는 도구가 아니라,
-            가능한 DAG를 점수화하고 개입 후보를 비교하는 탐색형 도구입니다.
-            """
-        )
+                - **ESS (Equivalent Sample Size)** = {ess}: 사전분포의 강도. 작을수록 데이터에 충실하고 희소한 구조를 선호합니다.
+                - 현재 1위 BDeu = **{scored[0][2]:.2f}**, 유효 DAG {len(valid_dags):,}개 중 최고점입니다.
+                - 연속형 변수를 이산화하면 정보가 손실되어 구조 식별력이 떨어질 수 있습니다.
+                - 관측 데이터만으로 Markov equivalence나 숨은 교란변수를 해결할 수는 없습니다.
+                """
+            )
 
     if ai_enabled:
         _ai_edges = format_edges(best_graph.edges())
@@ -2634,13 +2796,13 @@ with tabs[2]:
             f"당신은 인과 추론 전문가입니다. 아래 분석 결과를 비전문가도 이해할 수 있게 한국어 3~4문장으로 해석해주세요. "
             f"마크다운 문법 없이 일반 텍스트로 작성하세요.\n\n"
             f"데이터셋: {dataset_name}\n변수: {', '.join(variables)}\n결과 변수: {outcome}\n"
-            f"발견된 최적 DAG (BDeu 1위): {_ai_edges}\n{_ai_gt_text}\n"
-            f"유효 DAG 수: {len(valid_dags)}개, 1위 BDeu: {scored[0][2]:.2f}\n\n"
+            f"발견된 최적 DAG ({_scoring_label} 1위): {_ai_edges}\n{_ai_gt_text}\n"
+            f"유효 DAG 수: {len(valid_dags)}개, 1위 {_scoring_label}: {scored[0][2]:.2f}\n\n"
             f"1) 발견된 인과 화살표가 각각 무엇을 뜻하는지, 2) 이 구조가 얼마나 신뢰할 수 있는지 설명하세요."
         )
         _cache_key_s = prompt_cache_key("structure", _ai_prompt_structure)
         _local_structure_summary = (
-            f"BDeu 1위 구조는 {_ai_edges}입니다. "
+            f"{_scoring_label} 1위 구조는 {_ai_edges}입니다. "
             f"{_ai_gt_text.replace(chr(10), ' ')}. "
             "관측 데이터만으로는 Markov equivalence와 숨은 변수 때문에 정답 방향을 완전히 보장할 수 없으므로, "
             "이 결과는 가능한 DAG 후보 중 데이터에 가장 잘 맞는 탐색 결과로 해석해야 합니다."
@@ -2885,7 +3047,7 @@ with tabs[4]:
         하지만 변수가 늘어나면 이 방법은 현실적으로 불가능해집니다.
         <b>Grover 알고리즘</b>은 이런 비정렬 탐색 문제에서 검색 횟수를 제곱근 수준으로 줄여주는 양자 알고리즘입니다.<br><br>
         <b>작동 원리</b>: {n_edges}개 엣지 후보 각각을 큐비트 1개로 인코딩 → 모든 후보를 양자 중첩 상태로 동시에 준비 →
-        BDeu 상위 <b>{top_k_effective}개</b> DAG를 "정답"으로 표시(Oracle) →
+        {_scoring_label} 상위 <b>{top_k_effective}개</b> DAG를 "정답"으로 표시(Oracle) →
         양자 간섭으로 정답의 측정 확률을 증폭(Diffuser) → 측정하면 좋은 구조가 높은 확률로 나옴.
         <br><b>아래 버튼을 눌러 직접 실행해보세요.</b>
         </div>
@@ -2893,6 +3055,10 @@ with tabs[4]:
         unsafe_allow_html=True,
     )
 
+    # Defaults keep an already-stored session result renderable even if the
+    # current environment can no longer import Qiskit.
+    n_runs = 1
+    use_penalty = False
     qiskit_ok, qiskit_error = check_qiskit()
     if not qiskit_ok:
         st.error(f"Qiskit 또는 qiskit-aer를 불러올 수 없습니다: {qiskit_error}")
@@ -2903,9 +3069,9 @@ with tabs[4]:
         with run_cols[1]:
             n_runs = int(st.number_input("Multi-run", min_value=1, max_value=10, value=3, help="여러 번 실행해서 가장 좋은 결과를 선택합니다."))
         with run_cols[2]:
-            use_penalty = st.toggle("Penalty Oracle", value=False, help="순환 DAG에 부분 위상 패널티를 적용하여 유효 DAG 측정률을 높입니다.") if run_grover_search_with_penalty is not None else False
+            use_penalty = st.toggle("Penalty Oracle", value=False, help="순환 DAG의 위상을 변경합니다. 간섭에 따라 유효 DAG 측정률이 달라질 수 있습니다.") if run_grover_search_with_penalty is not None else False
         with run_cols[3]:
-            _penalty_note = " + Penalty Oracle (순환 DAG 억제)" if use_penalty else ""
+            _penalty_note = " + Penalty Oracle (순환 DAG 위상 변경)" if use_penalty else ""
             st.markdown(
                 f"<p class='small-note'>반복 {grover_iteration_count(n_edges, top_k_effective)}회 x {n_runs} runs{_penalty_note}. "
                 "여러 번 실행하면 측정 분산을 줄여 더 안정적인 결과를 얻습니다.</p>",
@@ -2947,6 +3113,11 @@ with tabs[4]:
     if grover_result is not None:
         if st.session_state.get("grover_run_key") != run_key:
             st.warning("현재 설정이 마지막 Grover 실행 때와 다릅니다. 정확한 비교를 위해 다시 실행하세요.")
+        elif (
+            grover_result.get("n_runs", 1) != n_runs
+            or grover_result.get("used_penalty", False) != use_penalty
+        ):
+            st.warning("Multi-run 또는 Penalty Oracle 설정이 마지막 실행과 다릅니다. 정확한 비교를 위해 다시 실행하세요.")
 
         selected_bitstring = grover_result["selected_bitstring"]
         grover_graph = bitstring_to_dag(selected_bitstring, edge_list)
@@ -2990,18 +3161,27 @@ with tabs[4]:
         detail_cols = st.columns(2)
         with detail_cols[0]:
             st.markdown("**Oracle 타겟 bitstring**")
-            st.dataframe(candidate_table(scored[:top_k_effective], ground_truth if has_ground_truth else None, top_k_effective), use_container_width=True, hide_index=True)
+            st.dataframe(
+                candidate_table(
+                    scored[:top_k_effective],
+                    ground_truth if has_ground_truth else None,
+                    top_k_effective,
+                    _scoring_label,
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
         with detail_cols[1]:
             st.markdown("**회로 및 후처리 요약**")
             uniform_p = top_k_effective / (2**n_edges) * 100
             summary_items = [
-                {"item": "Qubits", "value": grover_result["n_qubits"]},
+                {"item": "Qubits", "value": str(grover_result["n_qubits"])},
                 {"item": "Shots", "value": f"{grover_result['shots']:,}"},
                 {"item": "Elapsed", "value": f"{grover_result['elapsed_time']:.4f}s"},
                 {"item": "Raw top bitstring", "value": grover_result["top_bitstring"]},
-                {"item": "Raw top is valid DAG", "value": grover_result["raw_top_is_valid"]},
+                {"item": "Raw top is valid DAG", "value": str(grover_result["raw_top_is_valid"])},
                 {"item": "Selected (score-weighted)", "value": grover_result["selected_bitstring"]},
-                {"item": "Selected BDeu", "value": round(grover_result.get("selected_score") or 0, 3)},
+                {"item": f"Selected {_scoring_label}", "value": f"{(grover_result.get('selected_score') or 0):.3f}"},
                 {"item": "Uniform baseline", "value": f"{uniform_p:.2f}%"},
                 {"item": "Amplification", "value": f"{grover_result['good_probability']*100/uniform_p:.1f}x" if uniform_p > 0 else "N/A"},
             ]
@@ -3022,7 +3202,7 @@ with tabs[4]:
                 f"당신은 양자 컴퓨팅 및 Qiskit 전문가입니다. 아래의 Grover 알고리즘 기반 인과 구조 탐색 결과를 해석해주세요.\n\n"
                 f"### 분석 데이터:\n"
                 f"- 사용 큐비트 수: {n_edges} (각 엣지 후보당 1큐비트)\n"
-                f"- Oracle 타겟 수: {top_k_effective} (BDeu 상위 {top_k_effective}개 DAG)\n"
+                f"- Oracle 타겟 수: {top_k_effective} ({_scoring_label} 상위 {top_k_effective}개 DAG)\n"
                 f"- Grover 반복 횟수: {grover_result['n_iterations']}\n"
                 f"- Oracle 적중률: {grover_result['good_probability']*100:.1f}% (이론적 증폭 성공 여부)\n"
                 f"- 선택된 DAG 순위: {grover_result.get('selected_rank', '?')}위\n\n"
@@ -3063,9 +3243,9 @@ with tabs[4]:
         <div class="status-band" style="border-left-color: #dc2626; background: linear-gradient(90deg, #fef2f2 0%, #f8fafc 100%);">
         <b>기존 문제</b>: 위 Grover/QAOA는 모든 DAG를 고전적으로 전수조사({_n_full}개)한 뒤 결과를 Oracle에 하드코딩합니다.
         <b>답을 이미 안 뒤 탐색</b>하는 셈이므로, 양자 속도 향상이 실질적으로 무의미합니다.<br><br>
-        <b>해결</b>: BDeu 점수는 <b>분해 가능</b>합니다 — <code>Score(DAG) = Σ LocalScore(node, Parents)</code>.<br>
+        <b>해결</b>: {_scoring_label} 구조 점수는 <b>분해 가능</b>합니다 — <code>Score(DAG) = Σ LocalScore(node, Parents)</code>.<br>
         각 노드의 로컬 점수만 사전 계산하면(<b>{_n_local}개</b>, 전수조사 {_n_full}의 <b>{_n_local}/{_n_full}</b>),
-        양자 회로가 나머지 탐색을 수행합니다. 5변수 시 80 vs 1,048,576 — <b>13,000배 감소</b>.
+        로컬 양자 회로는 전수 점수표 없이 측정 상태를 평가·선택합니다. 이 화면의 고전 비교표는 별도로 계산한 전수 결과를 사용합니다.
         </div>
         """,
         unsafe_allow_html=True,
@@ -3073,7 +3253,10 @@ with tabs[4]:
 
     if _LOCAL_DECOMP_AVAILABLE:
         # 로컬 점수 사전 계산
-        _local_scores = precompute_local_scores(data, variables, edge_list, ess if not use_bge else 10)
+        if use_bge:
+            _local_scores = precompute_local_scores_bge(data, variables, edge_list)
+        else:
+            _local_scores = precompute_local_scores(data, variables, edge_list, ess)
 
         with st.expander(f"로컬 점수 테이블 ({_n_local}개 항목)", expanded=False):
             _ls_rows = []
@@ -3081,7 +3264,7 @@ with tabs[4]:
                 _ls_rows.append({
                     "노드": node,
                     "부모": ", ".join(sorted(parents)) if parents else "(없음)",
-                    "로컬 BDeu": f"{score:.2f}",
+                    f"로컬 {_scoring_label}": f"{score:.2f}",
                 })
             st.dataframe(pd.DataFrame(_ls_rows), use_container_width=True, hide_index=True)
             st.caption(f"사전 계산 항목: {_n_local}개 — 전수조사({_n_full}개) 대비 {_n_full/_n_local:.0f}배 감소")
@@ -3104,7 +3287,9 @@ with tabs[4]:
                         n_edges, edge_list, variables, _local_scores,
                         p_layers=_ql_layers, shots=shots, n_optimization_steps=16,
                     )
-                    _ql_enriched = enrich_grover_result(_ql_result, valid_bitstrings, scored)
+                    _ql_enriched = enrich_local_search_result(
+                        _ql_result, edge_list, variables, _local_scores
+                    )
                     _ql_enriched["local_decomposition"] = True
                     _ql_enriched["n_local_terms"] = _ql_result.get("n_local_terms", _n_local)
                 st.session_state["qaoa_local_result"] = _ql_enriched
@@ -3133,7 +3318,9 @@ with tabs[4]:
                         n_edges, edge_list, variables, _local_scores,
                         threshold_ratio=_gi_threshold, n_score_bits=8, shots=shots,
                     )
-                    _gi_enriched = enrich_grover_result(_gi_result, valid_bitstrings, scored)
+                    _gi_enriched = enrich_local_search_result(
+                        _gi_result, edge_list, variables, _local_scores
+                    )
                     _gi_enriched["incircuit_oracle"] = True
                 st.session_state["grover_incircuit_result"] = _gi_enriched
                 st.session_state["grover_incircuit_run_key"] = run_key
@@ -3192,7 +3379,7 @@ with tabs[4]:
             |---|---|---|
             | **Pre-computed Oracle (순환논리)** | 전수조사({_n_full}개)로 답을 알고 난 뒤 양자 "탐색" — 속도 향상 무의미 | **Local Score Decomposition** — 로컬 점수 {_n_local}개만 사전 계산, 양자 회로가 나머지 탐색 수행 (위 실험) |
             | **In-circuit 점수 평가** | Oracle이 점수를 회로 내에서 계산하지 않음 | **QFT Adder + Threshold Oracle** — ancilla 레지스터에 로컬 점수 누적, threshold 비교로 마킹 (위 In-circuit Grover) |
-            | **순환 DAG 포함** | 전체 $2^n$ 공간에 비유효 DAG 포함 | **Penalty Oracle** — 순환 DAG에 부분 위상 패널티 (위 토글) |
+            | **순환 DAG 포함** | 전체 $2^n$ 공간에 비유효 DAG 포함 | **Penalty Oracle** — 순환 DAG의 위상을 바꿔 간섭 효과를 실험 (위 토글, 개선 보장 없음) |
             | **이산화 정보 손실** | 연속 변수 이산화 시 구조 식별력 저하 | **BGe 점수** — 연속 데이터 직접 평가 (사이드바) |
             | **시뮬레이터** | Aer에서 2^n 진폭을 고전적으로 계산 — 실제 양자 속도 향상 없음 | 현재 하드웨어 한계, 회로 정확성 검증 목적 |
             | **Markov equivalence** | 관측 데이터만으로 동일 조건부 독립 DAG 구분 불가 | 미해결 — 개입 데이터 또는 FCI 필요 |
@@ -3222,17 +3409,16 @@ with tabs[4]:
             <div class="finding-label">이 탭의 핵심</div>
             <div class="finding-body">{_finding4_text}</div>
         </div>
-        <div class="nextstep-card">
-            <div class="nextstep-label">다음 단계 → 종합 분석</div>
-            <div class="nextstep-body">
-            마지막 탭에서 고전 탐색과 양자 탐색의 결과를 나란히 비교하고,
-            인과 구조 발견 → 개입 추천 → 양자 가속까지 전체 파이프라인의 종합 판단을 내립니다.
-            {f'Groq API를 연결했다면 AI 종합 보고서도 생성할 수 있습니다.' if ai_enabled else ''}
-            </div>
-        </div>
         """,
         unsafe_allow_html=True,
     )
+    _next_step_text = (
+        "마지막 탭에서 고전 탐색과 양자 탐색의 결과를 나란히 비교하고, "
+        "인과 구조 발견 → 개입 추천 → 양자 가속까지 전체 파이프라인의 종합 판단을 내립니다."
+    )
+    if ai_enabled:
+        _next_step_text += " Groq API를 연결했다면 AI 종합 보고서도 생성할 수 있습니다."
+    st.info(_next_step_text, icon="➡️")
 
 with tabs[5]:
     # ═══ 종합 분석 ═══
@@ -3317,11 +3503,17 @@ with tabs[5]:
                 ("SHD Error", best_metrics.get("shd", "-") if best_metrics else "-",
                  grover_metrics_r.get("shd", "-") if grover_metrics_r else "-"),
                 ("Search Depth", f"{len(valid_dags):,}", f"{active_grover_r['n_iterations']:,}"),
-                ("BDeu Score", round(best_score, 2), round(active_grover_r.get("selected_score", 0) or 0, 2)),
+                (f"{_scoring_label} Score", round(best_score, 2), round(active_grover_r.get("selected_score", 0) or 0, 2)),
                 ("Amplification", "1.0x", f"{active_grover_r['good_probability']/(top_k_effective/2**n_edges):.1f}x"),
             ]
             for name, c_val, g_val in dims:
-                compare_rows.append({"Metric": name, "Classical (Exhaustive)": c_val, "Quantum (Grover)": g_val})
+                compare_rows.append(
+                    {
+                        "Metric": name,
+                        "Classical (Exhaustive)": str(c_val),
+                        "Quantum (Grover)": str(g_val),
+                    }
+                )
             st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
 
         st.divider()
@@ -3330,17 +3522,17 @@ with tabs[5]:
         st.divider()
 
     # ── Score landscape ──
-    st.markdown("#### BDeu Score Landscape 및 데이터 요약")
+    st.markdown(f"#### {_scoring_label} Score Landscape 및 데이터 요약")
     explain_cols = st.columns([1.1, 0.9])
     with explain_cols[0]:
-        st.pyplot(plot_score_landscape(scored, top_k_effective), use_container_width=True)
+        st.pyplot(plot_score_landscape(scored, top_k_effective, _scoring_label), use_container_width=True)
     with explain_cols[1]:
         st.markdown(
             f"""
             | 항목 | 값 |
             |---|---|
             | 유효 DAG 후보 수 | **{len(valid_dags):,}**개 |
-            | 1위 구조 BDeu 점수 | **{scored[0][2]:.2f}** |
+            | 1위 구조 {_scoring_label} 점수 | **{scored[0][2]:.2f}** |
             | 결과 변수 | **{outcome}** |
             | 분석 모델 | **Qiskit-based Grover Search** |
             """

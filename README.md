@@ -10,6 +10,12 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+회귀 검증은 다음 명령으로 실행합니다.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
 ## 주요 기능
 
 - **7개 내장 데이터셋**: Sachs 단백질, Asia 폐질환, Sprinkler, Alarm ICU, Auto MPG, Framingham 심장병, Student 성적
@@ -44,7 +50,10 @@ streamlit run app.py
 - **비순환 조건**: Grover는 전체 비트 공간을 탐색하므로 순환 그래프가 측정될 수 있어, 유효 DAG만 후처리로 선택합니다.
 - **Markov equivalence**: 관측 데이터만으로는 동일한 조건부 독립 관계를 가진 여러 DAG를 구분할 수 없어, 정답 대비 F1이 낮을 수 있습니다.
 - **이산화**: 연속형 변수의 3분위 이산화로 인해 개입 효과는 원래 단위가 아닌 이산화 단위 기준입니다.
+- **BGe 적용 범위**: BGe는 연속형 수치 변수에만 적용합니다. 이산·범주형 변수는 BDeu를 사용해야 합니다.
 
 ## 기술 스택
 
-Qiskit 2.0+, qiskit-aer, numpy, pandas, networkx, matplotlib, streamlit, bnlearn
+Qiskit 2.1+, qiskit-aer, numpy, pandas, networkx, matplotlib, streamlit
+
+`data/download_datasets.py`로 벤치마크 데이터를 다시 내려받으려면 별도로 `bnlearn`을 설치하면 됩니다. 앱 실행에는 필요하지 않습니다.

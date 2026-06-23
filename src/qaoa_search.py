@@ -21,6 +21,39 @@ def _load_qiskit():
     return QuantumCircuit, AerSimulator
 
 
+def _apply_pattern_phase(qc, qubits, bitstring, phase):
+    """Apply ``exp(i * phase)`` only to one computational-basis pattern.
+
+    ``RZ`` wrapped by an MCX is *not* a multi-controlled phase gate: it
+    rotates the target qubit and mixes computational-basis states.  QAOA's
+    cost operator must stay diagonal, so use a controlled ``PhaseGate``.
+    """
+    from qiskit.circuit.library import PhaseGate
+
+    if len(qubits) != len(bitstring):
+        raise ValueError("bitstring length must match the number of qubits")
+    if not qubits:
+        raise ValueError("at least one qubit is required")
+
+    flipped = []
+    for qubit, bit in zip(qubits, bitstring):
+        if bit not in {"0", "1"}:
+            raise ValueError("bitstrings must contain only '0' and '1'")
+        if bit == "0":
+            qc.x(qubit)
+            flipped.append(qubit)
+
+    if len(qubits) == 1:
+        qc.p(phase, qubits[0])
+    else:
+        target = qubits[-1]
+        gate = PhaseGate(phase).control(len(qubits) - 1)
+        qc.append(gate, list(qubits[:-1]) + [target])
+
+    for qubit in reversed(flipped):
+        qc.x(qubit)
+
+
 def build_cost_operator(n_qubits, scored_dags, gamma):
     """BDeu 점수를 RZ 회전으로 인코딩하는 cost operator.
 
@@ -57,28 +90,7 @@ def build_cost_operator(n_qubits, scored_dags, gamma):
         if abs(phase) < 1e-10:
             continue
 
-        # Apply conditional phase: flip qubits where bit is '0',
-        # apply multi-controlled phase, flip back
-        flip_qubits = []
-        for i, bit in enumerate(bitstring):
-            if bit == "0":
-                qc.x(i)
-                flip_qubits.append(i)
-
-        # Multi-controlled RZ for the phase
-        if n_qubits == 1:
-            qc.rz(2 * phase, 0)
-        else:
-            # Use multi-controlled phase gate
-            # MCZ with phase = apply RZ on last qubit controlled by all others
-            qc.h(n_qubits - 1)
-            qc.mcx(list(range(n_qubits - 1)), n_qubits - 1)
-            qc.rz(2 * phase, n_qubits - 1)
-            qc.mcx(list(range(n_qubits - 1)), n_qubits - 1)
-            qc.h(n_qubits - 1)
-
-        for i in flip_qubits:
-            qc.x(i)
+        _apply_pattern_phase(qc, list(range(n_qubits)), bitstring, phase)
 
     return qc
 
@@ -314,32 +326,17 @@ def build_cost_operator_local(n_qubits, edge_list, variables, local_scores, gamm
             if abs(phase) < 1e-10:
                 continue
 
-            # 부모가 아닌(엣지 없는) 큐비트에 X → 모든 수신 큐비트가 |1⟩이 되도록
-            flip_qubits = []
-            for bit, (q_idx, src) in enumerate(incoming):
-                if not (mask & (1 << bit)):
-                    qc.x(q_idx)
-                    flip_qubits.append(q_idx)
-
-            # 수신 큐비트 전체에 대한 다중 제어 RZ
             all_incoming_q = [q_idx for q_idx, _ in incoming]
-
             if len(all_incoming_q) == 0:
-                # 수신 엣지 없음 (발생하지 않지만 안전 처리)
-                qc.rz(2 * phase, 0)
-            elif len(all_incoming_q) == 1:
-                qc.rz(2 * phase, all_incoming_q[0])
+                # A selected variable always has at least one possible incoming
+                # edge, but keep this branch safe for direct API callers.
+                continue
             else:
-                target = all_incoming_q[-1]
-                controls = all_incoming_q[:-1]
-                qc.h(target)
-                qc.mcx(controls, target)
-                qc.rz(2 * phase, target)
-                qc.mcx(controls, target)
-                qc.h(target)
-
-            for q_idx in flip_qubits:
-                qc.x(q_idx)
+                pattern = "".join(
+                    "1" if mask & (1 << bit) else "0"
+                    for bit in range(len(all_incoming_q))
+                )
+                _apply_pattern_phase(qc, all_incoming_q, pattern, phase)
 
     return qc
 

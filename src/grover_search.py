@@ -21,6 +21,33 @@ def _load_qiskit():
     return QuantumCircuit, AerSimulator
 
 
+def _apply_pattern_phase(qc, qubits, bitstring, phase):
+    """Apply a diagonal conditional phase to one computational-basis state."""
+    from qiskit.circuit.library import PhaseGate
+
+    if len(qubits) != len(bitstring):
+        raise ValueError("bitstring length must match the number of qubits")
+    if not qubits:
+        raise ValueError("at least one qubit is required")
+
+    flipped = []
+    for qubit, bit in zip(qubits, bitstring):
+        if bit not in {"0", "1"}:
+            raise ValueError("bitstrings must contain only '0' and '1'")
+        if bit == "0":
+            qc.x(qubit)
+            flipped.append(qubit)
+
+    if len(qubits) == 1:
+        qc.p(phase, qubits[0])
+    else:
+        target = qubits[-1]
+        qc.append(PhaseGate(phase).control(len(qubits) - 1), list(qubits[:-1]) + [target])
+
+    for qubit in reversed(flipped):
+        qc.x(qubit)
+
+
 def build_oracle(n_qubits, good_bitstrings):
     """좋은 DAG 비트 문자열들에 위상 반전을 적용하는 Oracle 회로 구성.
 
@@ -213,8 +240,8 @@ def build_penalty_oracle(n_qubits, good_bitstrings, cyclic_bitstrings, penalty_a
     1. good_bitstrings에 대해 완전한 위상 반전 (π) — Grover 마킹
     2. cyclic_bitstrings에 대해 부분 위상 패널티 (기본 π/4) — 진폭 억제
 
-    부분 위상 패널티는 순환(비유효) DAG의 진폭을 줄여서
-    측정 시 유효한 DAG가 선택될 확률을 높입니다.
+    부분 위상 패널티는 순환(비유효) DAG의 위상을 바꿉니다. Diffuser와의
+    간섭에 따라 유효 DAG 측정 확률이 달라질 수 있으나, 증가를 보장하지는 않습니다.
 
     Args:
         n_qubits: 큐비트 수
@@ -249,26 +276,14 @@ def build_penalty_oracle(n_qubits, good_bitstrings, cyclic_bitstrings, penalty_a
         for i in flip_qubits:
             oracle.x(i)
 
-    # --- Part 2: 순환 DAG에 부분 위상 패널티 (RZ 회전) ---
+    # --- Part 2: 순환 DAG에 부분 위상 패널티 ---
     for target_bits in cyclic_bitstrings:
-        flip_qubits = []
-        for i, bit in enumerate(target_bits):
-            if bit == "0":
-                oracle.x(i)
-                flip_qubits.append(i)
-
-        # Multi-controlled RZ: 해당 비트 문자열에만 부분 위상 적용
-        if n_qubits == 1:
-            oracle.rz(penalty_angle, 0)
-        else:
-            oracle.h(n_qubits - 1)
-            oracle.mcx(list(range(n_qubits - 1)), n_qubits - 1)
-            oracle.rz(penalty_angle, n_qubits - 1)
-            oracle.mcx(list(range(n_qubits - 1)), n_qubits - 1)
-            oracle.h(n_qubits - 1)
-
-        for i in flip_qubits:
-            oracle.x(i)
+        _apply_pattern_phase(
+            oracle,
+            list(range(n_qubits)),
+            target_bits,
+            -penalty_angle,
+        )
 
     return oracle
 
@@ -278,8 +293,8 @@ def run_grover_search_with_penalty(
 ):
     """Penalty Oracle을 사용한 Grover 알고리즘 실행.
 
-    좋은 DAG의 진폭을 증폭하면서 동시에 순환(비유효) DAG의 진폭을 억제합니다.
-    이를 통해 유효 DAG 측정 확률이 기본 Grover보다 향상될 수 있습니다.
+    좋은 DAG의 진폭을 증폭하고 순환(비유효) DAG의 위상을 별도로 바꿉니다.
+    유효 DAG 측정 확률의 변화는 회로·반복 횟수에 따라 달라지므로 실험값으로 비교해야 합니다.
 
     Args:
         n_qubits: 큐비트 수 (= 엣지 후보 수)
@@ -370,31 +385,29 @@ def run_grover_search_with_penalty(
 
 
 def _apply_qft(qc, qubits):
-    """Quantum Fourier Transform."""
-    n = len(qubits)
-    for i in range(n):
-        qc.h(qubits[i])
-        for j in range(i + 1, n):
-            qc.cp(math.pi / 2 ** (j - i), qubits[j], qubits[i])
-    for i in range(n // 2):
-        qc.swap(qubits[i], qubits[n - 1 - i])
+    """Append a canonical no-swap QFT to an arbitrary qubit subset."""
+    from qiskit.synthesis.qft import synth_qft_full
+
+    qc.compose(synth_qft_full(len(qubits), do_swaps=False), qubits=list(qubits), inplace=True)
 
 
 def _apply_iqft(qc, qubits):
-    """Inverse QFT."""
-    n = len(qubits)
-    for i in range(n // 2):
-        qc.swap(qubits[i], qubits[n - 1 - i])
-    for i in range(n - 1, -1, -1):
-        for j in range(n - 1, i, -1):
-            qc.cp(-math.pi / 2 ** (j - i), qubits[j], qubits[i])
-        qc.h(qubits[i])
+    """Append the inverse of :func:`_apply_qft`."""
+    from qiskit.synthesis.qft import synth_qft_full
+
+    qc.compose(
+        synth_qft_full(len(qubits), do_swaps=False).inverse(),
+        qubits=list(qubits),
+        inplace=True,
+    )
 
 
 def _add_qft_unconditional(qc, reg, value, n_bits):
     """QFT 도메인에서 레지스터에 정수 value를 무조건 가산."""
     for i in range(n_bits):
-        angle = 2 * math.pi * value / (2 ** (n_bits - i))
+        # _apply_qft uses a no-swap QFT, whose physical qubit i carries the
+        # 2**i Fourier weight.
+        angle = 2 * math.pi * value / (2 ** (i + 1))
         if abs(angle) < 1e-12:
             continue
         qc.p(angle, reg[i])
@@ -421,7 +434,7 @@ def _controlled_add_qft(qc, controls, reg, value, n_bits):
     from qiskit.circuit.library import PhaseGate
 
     for i in range(n_bits):
-        angle = 2 * math.pi * value / (2 ** (n_bits - i))
+        angle = 2 * math.pi * value / (2 ** (i + 1))
         if abs(angle) < 1e-12:
             continue
 
@@ -443,7 +456,7 @@ def _controlled_sub_qft(qc, controls, reg, value, n_bits):
     from qiskit.circuit.library import PhaseGate
 
     for i in range(n_bits):
-        angle = -2 * math.pi * value / (2 ** (n_bits - i))
+        angle = -2 * math.pi * value / (2 ** (i + 1))
         if abs(angle) < 1e-12:
             continue
 
@@ -677,20 +690,19 @@ def run_grover_incircuit(n_qubits, edge_list, variables, local_scores,
         bs: score_bitstring_from_local(bs, edge_list, variables, local_scores)
         for bs in corrected
     }
-    # threshold 이상인 비트 문자열의 측정 확률
+    # Threshold success must be evaluated in the same quantized score domain
+    # used by the oracle.  Comparing a de-quantized floating-point score can
+    # classify states differently around the rounding boundary.
     quantized, q_max, q_min = _quantize_local_scores(local_scores, variables, n_score_bits)
     threshold_int = int(q_min + threshold_ratio * (q_max - q_min))
-
-    all_local = list(local_scores.values())
-    min_s = min(all_local)
-    shifted_scores = {k: v - min_s for k, v in local_scores.items()}
-    max_sum = sum(max(shifted_scores[k] for k in shifted_scores if k[0] == n) for n in variables)
-    scale = (2 ** (n_score_bits - 1) - 1) / max_sum if max_sum > 0 else 1.0
-    real_threshold = threshold_int / scale + min_s * len(variables)
+    quantized_measured_scores = {
+        bs: score_bitstring_from_local(bs, edge_list, variables, quantized)
+        for bs in corrected
+    }
 
     good_count = sum(
         cnt for bs, cnt in corrected.items()
-        if measured_scores.get(bs, -np.inf) >= real_threshold
+        if quantized_measured_scores.get(bs, -np.inf) >= threshold_int
     )
     good_probability = good_count / shots
 
@@ -712,4 +724,5 @@ def run_grover_incircuit(n_qubits, edge_list, variables, local_scores,
         "n_total_qubits": n_total,
         "n_score_bits": n_score_bits,
         "threshold_ratio": threshold_ratio,
+        "threshold_int": threshold_int,
     }

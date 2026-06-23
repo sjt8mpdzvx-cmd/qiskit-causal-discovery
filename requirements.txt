@@ -1,10 +1,7 @@
-qiskit>=2.0
+qiskit>=2.1
 qiskit-aer>=0.17
 numpy
-scipy
-scikit-learn
 pandas
 networkx
 matplotlib
 streamlit
-bnlearn
