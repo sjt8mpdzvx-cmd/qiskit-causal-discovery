@@ -78,9 +78,23 @@ from src.dag_utils import (  # noqa: E402
     enumerate_all_dags,
     structural_hamming_distance,
 )
-from src.grover_search import run_grover_search, run_grover_search_with_penalty  # noqa: E402
-from src.scoring import score_all_dags, score_all_dags_bge  # noqa: E402
-from src.qaoa_search import run_qaoa_search  # noqa: E402
+from src.grover_search import run_grover_search  # noqa: E402
+from src.scoring import score_all_dags  # noqa: E402
+
+try:
+    from src.grover_search import run_grover_search_with_penalty  # noqa: E402
+except ImportError:
+    run_grover_search_with_penalty = None
+
+try:
+    from src.scoring import score_all_dags_bge  # noqa: E402
+except ImportError:
+    score_all_dags_bge = None
+
+try:
+    from src.qaoa_search import run_qaoa_search  # noqa: E402
+except ImportError:
+    run_qaoa_search = None
 
 
 @dataclass(frozen=True)
@@ -1992,9 +2006,12 @@ if data_mode == "내장 데이터셋":
         ground_truth_edges = parse_edge_text(custom_edge_text)
 
 st.sidebar.divider()
+_scoring_options = ["BDeu (이산)"]
+if score_all_dags_bge is not None:
+    _scoring_options.append("BGe (연속)")
 scoring_method = st.sidebar.radio(
     "점수 함수",
-    ["BDeu (이산)", "BGe (연속)"],
+    _scoring_options,
     horizontal=True,
     help="BDeu: 이산 데이터에 최적. BGe: 연속 데이터를 이산화 없이 직접 평가 (정보 손실 없음).",
 )
@@ -2870,7 +2887,7 @@ with tabs[4]:
         with run_cols[1]:
             n_runs = int(st.number_input("Multi-run", min_value=1, max_value=10, value=3, help="여러 번 실행해서 가장 좋은 결과를 선택합니다."))
         with run_cols[2]:
-            use_penalty = st.toggle("Penalty Oracle", value=False, help="순환 DAG에 부분 위상 패널티를 적용하여 유효 DAG 측정률을 높입니다.")
+            use_penalty = st.toggle("Penalty Oracle", value=False, help="순환 DAG에 부분 위상 패널티를 적용하여 유효 DAG 측정률을 높입니다.") if run_grover_search_with_penalty is not None else False
         with run_cols[3]:
             _penalty_note = " + Penalty Oracle (순환 DAG 억제)" if use_penalty else ""
             st.markdown(
@@ -3064,7 +3081,7 @@ with tabs[4]:
             unsafe_allow_html=True,
         )
 
-    if qaoa_pressed:
+    if qaoa_pressed and run_qaoa_search is not None:
         with st.spinner(f"QAOA {qaoa_layers}-layer 회로를 실행하고 파라미터를 최적화하는 중..."):
             _qaoa_result = run_qaoa_search(n_edges, scored, p_layers=qaoa_layers, shots=shots)
             _qaoa_enriched = enrich_grover_result(_qaoa_result, valid_bitstrings, scored)
