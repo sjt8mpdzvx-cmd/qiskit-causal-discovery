@@ -1588,6 +1588,100 @@ st.markdown(
         color: #1d4ed8;
     }
 
+    /* ── Value proposition cards ── */
+    .value-props {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 1rem;
+        margin: 0 0 1.5rem 0;
+    }
+    .value-card {
+        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 1.2rem 1.3rem;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .value-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .value-icon {
+        font-size: 1.6rem;
+        margin-bottom: 0.4rem;
+    }
+    .value-title {
+        font-weight: 700;
+        color: #0f172a;
+        font-size: 0.92rem;
+        margin-bottom: 0.3rem;
+    }
+    .value-desc {
+        font-size: 0.82rem;
+        color: #475569;
+        line-height: 1.5;
+    }
+
+    /* ── Key finding / Next step cards ── */
+    .finding-card {
+        background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+        border: 1px solid #86efac;
+        border-left: 5px solid #059669;
+        border-radius: 0 14px 14px 0;
+        padding: 1.3rem 1.5rem;
+        margin: 1.2rem 0 0.6rem 0;
+    }
+    .finding-card .finding-label {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #059669;
+        margin-bottom: 0.4rem;
+    }
+    .finding-card .finding-body {
+        font-size: 0.93rem;
+        color: #1e293b;
+        line-height: 1.6;
+    }
+    .nextstep-card {
+        background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+        border: 1px solid #a5b4fc;
+        border-left: 5px solid #6366f1;
+        border-radius: 0 14px 14px 0;
+        padding: 1rem 1.3rem;
+        margin: 0.4rem 0 0.5rem 0;
+    }
+    .nextstep-card .nextstep-label {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #6366f1;
+        margin-bottom: 0.3rem;
+    }
+    .nextstep-card .nextstep-body {
+        font-size: 0.9rem;
+        color: #312e81;
+        line-height: 1.55;
+    }
+    .chapter-num {
+        display: inline-block;
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        color: #ffffff;
+        font-weight: 800;
+        font-size: 0.7rem;
+        width: 22px;
+        height: 22px;
+        line-height: 22px;
+        text-align: center;
+        border-radius: 50%;
+        margin-right: 0.5rem;
+        vertical-align: middle;
+    }
+
     /* ── Info / Warning / Success boxes ── */
     .stAlert > div {
         border-radius: 10px;
@@ -1626,6 +1720,170 @@ st.markdown(
     hr {
         border-color: #e2e8f0;
         margin: 1.5rem 0;
+    }
+
+    /* ── Project Intro Tab ── */
+    .intro-section {
+        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 1.6rem 1.8rem;
+        margin-bottom: 1.2rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .intro-section h4 {
+        color: #0f172a;
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin: 0 0 0.6rem 0;
+    }
+    .intro-section p, .intro-section li {
+        color: #334155;
+        font-size: 0.92rem;
+        line-height: 1.65;
+    }
+    .intro-accent {
+        border-left: 4px solid #6366f1;
+        background: linear-gradient(90deg, #eef2ff 0%, #f8fafc 100%);
+        padding: 1.2rem 1.4rem;
+        border-radius: 0 12px 12px 0;
+        margin: 1rem 0;
+        font-size: 0.93rem;
+        color: #1e293b;
+        line-height: 1.6;
+    }
+    .concept-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.9rem;
+        margin: 0.8rem 0;
+    }
+    .concept-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1.1rem 1.3rem;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .concept-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .concept-card .concept-term {
+        font-weight: 700;
+        color: #4f46e5;
+        font-size: 0.95rem;
+        margin-bottom: 0.3rem;
+    }
+    .concept-card .concept-eng {
+        font-size: 0.78rem;
+        color: #64748b;
+        margin-bottom: 0.4rem;
+    }
+    .concept-card .concept-desc {
+        font-size: 0.85rem;
+        color: #334155;
+        line-height: 1.55;
+    }
+    .step-flow {
+        display: flex;
+        gap: 0.8rem;
+        margin: 1rem 0;
+        flex-wrap: wrap;
+    }
+    .step-card {
+        flex: 1;
+        min-width: 180px;
+        background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1rem 1.1rem;
+        position: relative;
+    }
+    .step-card .step-num {
+        display: inline-block;
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        color: #ffffff;
+        font-weight: 700;
+        font-size: 0.75rem;
+        width: 24px;
+        height: 24px;
+        line-height: 24px;
+        text-align: center;
+        border-radius: 50%;
+        margin-bottom: 0.5rem;
+    }
+    .step-card .step-title {
+        font-weight: 700;
+        color: #0f172a;
+        font-size: 0.88rem;
+        margin-bottom: 0.25rem;
+    }
+    .step-card .step-desc {
+        font-size: 0.82rem;
+        color: #475569;
+        line-height: 1.5;
+    }
+    .quantum-highlight {
+        background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
+        border-radius: 14px;
+        padding: 1.6rem 1.8rem;
+        margin: 1rem 0;
+        color: #e2e8f0;
+    }
+    .quantum-highlight h4 {
+        color: #a5b4fc !important;
+        font-size: 1.05rem;
+        font-weight: 700;
+        margin: 0 0 0.6rem 0;
+    }
+    .quantum-highlight p, .quantum-highlight li {
+        color: #cbd5e1;
+        font-size: 0.9rem;
+        line-height: 1.6;
+    }
+    .quantum-highlight code {
+        background: rgba(99,102,241,0.2);
+        color: #c7d2fe;
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        font-size: 0.84rem;
+    }
+    .guide-banner {
+        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        border-radius: 14px;
+        padding: 1.4rem 1.6rem;
+        margin: 1rem 0;
+        color: #ffffff;
+    }
+    .guide-banner h4 {
+        color: #ffffff !important;
+        font-size: 1.05rem;
+        font-weight: 700;
+        margin: 0 0 0.5rem 0;
+    }
+    .guide-banner p {
+        color: rgba(255,255,255,0.9);
+        font-size: 0.9rem;
+        line-height: 1.6;
+    }
+    .reflection-box {
+        background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
+        border: 1px solid #fde68a;
+        border-radius: 14px;
+        padding: 1.4rem 1.6rem;
+        margin: 1rem 0;
+    }
+    .reflection-box h4 {
+        color: #92400e;
+        font-size: 1.05rem;
+        font-weight: 700;
+        margin: 0 0 0.5rem 0;
+    }
+    .reflection-box p {
+        color: #78350f;
+        font-size: 0.9rem;
+        line-height: 1.65;
     }
     </style>
     """,
@@ -1781,13 +2039,38 @@ run_key = f"{dataset_name}|{','.join(variables)}|{ess}|{top_k}|{shots}|{auto_dis
 st.markdown(
     f"""
     <div class="hero-container">
-        <div class="hero-badge">Causal Inference + Qiskit</div>
+        <div class="hero-badge">Quantum Causal Discovery Lab</div>
         <div class="hero-title" style="color:#f8fafc !important;font-size:1.85rem;font-weight:800;line-height:1.22;text-shadow:0 2px 18px rgba(0,0,0,0.35);">
-            상관관계를 넘어서: 어디에 개입해야 하는가
+            데이터에서 '진짜 원인'을 찾아, 가장 효과적인 개입 지점을 추천합니다
         </div>
         <div class="hero-subtitle" style="color:#dbeafe !important;font-size:0.95rem;line-height:1.5;max-width:920px;">
-            관측 데이터에서 인과 구조(DAG)를 발견하고, 결과 변수를 바꾸기 위해 어떤 변수에 개입해야 하는지 추천합니다.<br>
-            인과 구조 탐색에 Grover 알고리즘을 접목한 양자적 시도를 포함합니다.
+            "두 변수가 함께 움직인다"는 것은 하나가 다른 하나의 원인이라는 뜻이 아닙니다.
+            이 시스템은 관측 데이터에서 변수 간 <b>숨겨진 인과 구조</b>를 자동으로 발견하고,
+            <b>어떤 변수를 조절해야 원하는 결과를 얻을 수 있는지</b> 개입 전략을 추천합니다.
+            탐색 과정에 양자 컴퓨팅(Grover 알고리즘)을 접목해 속도 향상 가능성을 시연합니다.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+    <div class="value-props">
+        <div class="value-card">
+            <div class="value-icon">🔍</div>
+            <div class="value-title">인과 구조 자동 발견</div>
+            <div class="value-desc">수천 개의 가능한 인과 그래프 중<br>데이터에 가장 부합하는 구조를 찾습니다</div>
+        </div>
+        <div class="value-card">
+            <div class="value-icon">🎯</div>
+            <div class="value-title">개입 타겟 추천</div>
+            <div class="value-desc">결과를 바꾸려면 어떤 변수를<br>조절해야 하는지 순위를 매겨 추천합니다</div>
+        </div>
+        <div class="value-card">
+            <div class="value-icon">⚛️</div>
+            <div class="value-title">양자 알고리즘 접목</div>
+            <div class="value-desc">Grover 탐색으로 최적 구조를 찾는<br>속도를 이론적으로 제곱근만큼 단축합니다</div>
         </div>
     </div>
     """,
@@ -1815,18 +2098,311 @@ else:
     metric_cols[3].metric("정답 대비", "N/A", "정답 구조 없음")
 metric_cols[4].metric("추천 개입 타겟", _top_target, _top_action)
 
-tabs = st.tabs(["왜 인과관계인가", "인과 구조 발견", "개입 추천", "양자적 접근", "종합 분석"])
+tabs = st.tabs(["프로젝트 소개", "왜 인과관계인가", "인과 구조 발견", "개입 추천", "양자적 접근", "종합 분석"])
 
 with tabs[0]:
-    # ═══ 왜 인과관계인가 ═══
-    st.subheader("상관관계 ≠ 인과관계")
+    # ═══ 프로젝트 소개 ═══
+
+    # ── 지금 분석 중인 데이터로 시작: "당신의 문제는 이것입니다" ──
+    _intro_outcome_dir = "높이" if outcome_higher_is_better else "줄이"
+    _intro_best_edges = format_edges(best_graph.edges())
+    _intro_has_intv = has_actionable_intervention(_preview_intervention)
+    _intro_top = _preview_intervention.iloc[0] if _intro_has_intv else None
 
     st.markdown(
+        f"""
+        <div class="intro-section" style="border-left: 4px solid #6366f1; border-radius: 0 14px 14px 0;">
+            <h4 style="color:#4f46e5;">지금 보고 있는 분석</h4>
+            <p>
+            <b>{dataset_name}</b> 데이터의 변수 <b>{', '.join(variables)}</b> 사이에서
+            인과 구조를 탐색하고 있습니다.<br>
+            목표는 <b><code>{outcome}</code></b> 값을 <b>{_intro_outcome_dir}기 위해</b>
+            어떤 변수를 조절해야 하는지 찾는 것입니다.
+            </p>
+            <p>
+            현재까지의 결과: 유효한 DAG 후보 <b>{len(valid_dags):,}개</b> 중 최적 구조는
+            <b>{_intro_best_edges}</b>이며{f', 가장 효과적인 개입 타겟은 <b>{_intro_top["target"]}</b>({_intro_top["recommended_action"]})입니다.' if _intro_has_intv else ', 아직 명확한 개입 타겟이 도출되지 않았습니다.'}
+            <b>아래 탭을 하나씩 따라가면 이 결과가 어떻게 도출되었는지 직접 확인할 수 있습니다.</b>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # ── 이 앱은 어떤 문제를 풀고 있는가 ──
+    st.markdown("#### 이 앱이 풀고 있는 문제")
+
+    prob_cols = st.columns([1, 1])
+    with prob_cols[0]:
+        st.markdown(
+            """
+            **데이터를 보고 의사결정을 내린다고 합시다.**
+
+            매출이 오르면 광고비도 올랐다. 그러면 "광고를 더 하면 매출이 오르는가?"
+            아이스크림 판매량과 익사 사고가 함께 올랐다. "아이스크림을 금지하면 익사가 줄어드는가?"
+
+            정답은 **알 수 없다**입니다.
+            함께 움직인다(상관관계)는 것은 하나가 다른 하나의 원인(인과관계)이라는 뜻이 **아닙니다.**
+            상관관계만 보고 개입하면, **엉뚱한 곳에 돈과 시간을 쓰게 됩니다.**
+            """
+        )
+    with prob_cols[1]:
+        st.markdown(
+            f"""
+            **이 앱이 하는 일:**
+
+            1. 관측 데이터에서 **"무엇이 무엇의 원인인가"** (인과 구조, DAG)를 자동으로 찾습니다
+            2. 찾은 구조를 바탕으로 **"어디에 개입하면 결과가 바뀌는가"** 를 계산합니다
+            3. 이 과정에서 양자 컴퓨팅(Grover 알고리즘)이 탐색을 가속할 수 있음을 시연합니다
+
+            지금 보고 있는 **{dataset_name}** 데이터에서,
+            **{outcome}**을 {_intro_outcome_dir}려면 어떤 변수를 건드려야 하는지 —
+            이 앱이 끝까지 답을 제시합니다.
+            """
+        )
+
+    st.divider()
+
+    # ── 분석 파이프라인: 이 앱이 작동하는 방식 ──
+    st.markdown("#### 분석 파이프라인")
+    st.markdown(
+        f"""
+        <p class="small-note" style="margin-bottom:0.6rem;">
+        아래 5단계를 각 탭에서 직접 확인하고 조작할 수 있습니다. 사이드바에서 파라미터를 바꾸면 모든 결과가 실시간으로 갱신됩니다.
+        </p>
+        <div class="step-flow">
+            <div class="step-card">
+                <div class="step-num">1</div>
+                <div class="step-title">상관 vs 인과</div>
+                <div class="step-desc">
+                    {', '.join(variables)} 변수의 상관행렬을 보여주고,
+                    왜 이것만으로는 부족한지 설명합니다.
+                </div>
+            </div>
+            <div class="step-card">
+                <div class="step-num">2</div>
+                <div class="step-title">구조 탐색</div>
+                <div class="step-desc">
+                    {n_total:,}개 후보 중 유효한 {len(valid_dags):,}개를
+                    BDeu 점수로 평가해 최적 DAG를 찾습니다.
+                </div>
+            </div>
+            <div class="step-card">
+                <div class="step-num">3</div>
+                <div class="step-title">개입 추천</div>
+                <div class="step-desc">
+                    발견된 DAG로 do-calculus를 적용,
+                    {outcome}에 가장 큰 영향을 주는 변수를 추천합니다.
+                </div>
+            </div>
+            <div class="step-card">
+                <div class="step-num">4</div>
+                <div class="step-title">양자 탐색</div>
+                <div class="step-desc">
+                    {n_edges}큐비트 Grover 회로로 고득점 DAG의
+                    측정 확률을 증폭시키는 실험입니다.
+                </div>
+            </div>
+            <div class="step-card">
+                <div class="step-num">5</div>
+                <div class="step-title">종합 판단</div>
+                <div class="step-desc">
+                    고전 vs 양자 비교, 게이지, 레이더 차트,
+                    AI 종합 보고서를 한 곳에서 확인합니다.
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # ── 핵심 용어: 펼쳐볼 수 있는 형태 ──
+    st.markdown("#### 처음이라면: 핵심 개념 6가지")
+    st.markdown("<p class='small-note'>각 항목을 펼쳐서 읽어보세요. 이후 탭에서 이 개념들이 실제 데이터에 어떻게 적용되는지 직접 확인하게 됩니다.</p>", unsafe_allow_html=True)
+
+    _concept_cols = st.columns(2)
+    with _concept_cols[0]:
+        with st.expander("DAG (방향 비순환 그래프)"):
+            st.markdown(
+                f"""
+                **Directed Acyclic Graph** — 변수 간 인과관계를 화살표로 표현한 그래프입니다.
+
+                - `A → B`는 "A가 B의 원인"이라는 뜻
+                - 순환(A→B→A)이 없어야 해서 '비순환'
+                - 지금 분석에서는 **{', '.join(variables)}** 사이의 가능한 화살표 조합 **{n_total:,}개** 중
+                  비순환 조건을 만족하는 **{len(valid_dags):,}개**가 후보입니다
+
+                **→ [인과 구조 발견] 탭**에서 데이터가 가장 지지하는 DAG를 찾습니다.
+                """
+            )
+        with st.expander("BDeu 점수"):
+            st.markdown(
+                f"""
+                **Bayesian Dirichlet equivalent uniform Score** — 특정 DAG 구조가 관측 데이터에
+                얼마나 잘 맞는지 측정하는 점수입니다.
+
+                - 점수가 높을수록 "이 인과 구조가 데이터를 잘 설명한다"
+                - ESS(Equivalent Sample Size) 파라미터로 사전분포 강도 조절 (현재 ESS={ess})
+                - 현재 최고 점수: **{best_score:.1f}**
+
+                **→ [인과 구조 발견] 탭**에서 점수 분포를 확인하고 상위 DAG를 비교합니다.
+                """
+            )
+        with st.expander("do-calculus / Backdoor Adjustment"):
+            st.markdown(
+                f"""
+                **개입 연산** — "변수 X를 인위적으로 특정 값으로 고정하면 Y가 어떻게 바뀌는가?"를
+                계산하는 인과 추론 방법입니다.
+
+                - 단순히 "X가 높을 때 Y도 높더라"(관찰)가 아니라
+                - "X를 **강제로** 높이면 Y가 **얼마나** 바뀌는가"(개입)를 추정
+                - 교란 변수(confounders)를 통계적으로 차단해서 순수 효과만 계산
+
+                **→ [개입 추천] 탭**에서 {outcome}에 대한 각 변수의 개입 효과를 비교합니다.
+                """
+            )
+    with _concept_cols[1]:
+        with st.expander("Grover 알고리즘"):
+            st.markdown(
+                f"""
+                **Grover's Search Algorithm** — 정렬되지 않은 N개 후보에서 원하는 답을 찾는 양자 알고리즘입니다.
+
+                - 고전 컴퓨터: 최악의 경우 N번 모두 확인해야 함 → **O(N)**
+                - Grover: 양자 간섭으로 약 √N번만에 찾음 → **O(√N)**
+                - 현재 분석: 후보 {n_total:,}개 → 고전 {n_total:,}번 vs Grover ~{int(math.sqrt(n_total))}번
+
+                **→ [양자적 접근] 탭**에서 직접 Grover 회로를 실행해볼 수 있습니다.
+                """
+            )
+        with st.expander("진폭 증폭 (Amplitude Amplification)"):
+            st.markdown(
+                """
+                Grover 알고리즘의 핵심 원리입니다.
+
+                - 모든 후보를 양자 **중첩** 상태로 놓음 (각각 동일한 확률)
+                - **Oracle**: "이 상태가 좋은 답인가?" 판별 → 좋은 답에 위상 표시
+                - **Diffuser**: 양자 간섭으로 좋은 답의 확률을 **높이고** 나쁜 답의 확률을 **낮춤**
+                - 이걸 적절한 횟수만큼 반복하면, 측정 시 좋은 답이 나올 확률이 극대화
+
+                **→ [양자적 접근] 탭**의 측정 분포 차트에서 증폭 효과를 눈으로 확인합니다.
+                """
+            )
+        with st.expander("Oracle (오라클)"):
+            st.markdown(
+                f"""
+                Grover 회로에서 **"이 상태가 정답인가?"를 판별하는 양자 게이트**입니다.
+
+                - 이 앱에서는 BDeu 점수 **상위 {top_k_effective}개** DAG를 "좋은 답"으로 표시
+                - Oracle이 표시한 상태의 진폭이 Diffuser를 통해 증폭됨
+                - 현재 한계: 점수 계산 자체는 고전적으로 수행 후 결과를 Oracle에 하드코딩
+                  (향후 In-circuit Scoring으로 발전 가능)
+
+                **→ [양자적 접근] 탭**에서 Oracle 타겟 목록과 회로 구조를 확인합니다.
+                """
+            )
+
+    st.divider()
+
+    # ── 양자적 접근: 왜 Grover인가 (데이터에 맞춰 동적 설명) ──
+    st.markdown(
+        f"""
+        <div class="quantum-highlight">
+            <h4>왜 양자 컴퓨팅을 접목했는가</h4>
+            <p>
+            인과 구조 탐색은 본질적으로 <b>비정렬 탐색 문제</b>입니다.
+            지금 분석하는 {len(variables)}개 변수만 해도 가능한 엣지 조합이 <b>{n_total:,}개</b>이고,
+            변수가 하나 늘 때마다 탐색 공간은 기하급수적으로 커집니다.
+            </p>
+            <p>
+            이 프로젝트는 Qiskit Aer 시뮬레이터를 활용해 이 문제를 양자 도메인으로 정식화했습니다:
+            </p>
+            <ul style="margin:0.5rem 0; padding-left:1.3rem;">
+                <li><b>인코딩</b>: {n_edges}개 엣지 후보 각각을 큐비트 1개로 매핑 → <b>{n_edges}큐비트</b> 회로</li>
+                <li><b>Oracle</b>: BDeu 상위 {top_k_effective}개 DAG를 marked state로 설정</li>
+                <li><b>증폭</b>: Grover 반복을 통해 고득점 구조의 측정 확률을 유의미하게 높임</li>
+                <li><b>의의</b>: 전수조사 <code>O({n_total:,})</code> → Grover <code>O({int(math.sqrt(n_total))})</code> 이차 속도 향상 시연</li>
+            </ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── Groq API 안내 ──
+    st.markdown(
         """
+        <div class="guide-banner">
+            <h4>AI 해석 기능 안내</h4>
+            <p>
+            사이드바에 Groq API 키를 입력하면 각 탭에 <b>"AI 해석 생성"</b> 버튼이 활성화됩니다.
+            LLaMA 3.3 70B 모델이 통계 결과를 전문 보고서 형태로 변환해줍니다.
+            API 키 없이도 모든 분석과 시각화는 정상 작동하며, 앱 자체 해석도 함께 제공됩니다.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # ── 제작 과정과 회고 ──
+    st.markdown("#### 이 앱은 어떻게 만들어졌는가")
+    process_cols = st.columns([1, 1])
+    with process_cols[0]:
+        with st.expander("기술적 도전과 해결", expanded=True):
+            st.markdown(
+                """
+                **BDeu 점수 함수 직접 구현**
+                라이브러리에 의존하지 않고 노드별 조건부 분포의
+                marginal likelihood를 직접 계산합니다.
+
+                **Backdoor Adjustment 구현**
+                교란 변수가 통제된 상태에서의 순수 개입 효과를 추정.
+                관측 조합이 부족한 경우를 위해 Coverage 기반 신뢰도 지표를
+                도입하여 "이 추정을 얼마나 믿을 수 있는가"까지 제시합니다.
+
+                **Groq API 안정화**
+                보안 차단(Error 1010)을 User-Agent 헤더 설정으로 해결.
+                API 실패 시에도 앱 자체 해석으로 fallback합니다.
+                """
+            )
+    with process_cols[1]:
+        with st.expander("프로젝트의 의의와 한계", expanded=True):
+            st.markdown(
+                """
+                **의의**: 양자 컴퓨팅 수업에서 학습한 Grover 알고리즘을
+                실제 데이터 과학의 난제인 인과 추론에 접목했습니다.
+                이론적 회로를 넘어, **현실의 의사결정 문제를 양자 알고리즘에
+                맞게 정식화(Formulation)하는 과정** 자체가 핵심 기여입니다.
+
+                **현재 한계**: Oracle 내에서 BDeu 점수를 직접 계산하지 않고
+                고전적으로 미리 계산한 결과를 사용합니다(Pre-computed Oracle).
+
+                **향후 전망**: In-circuit Scoring — Oracle 안에서
+                점수를 양자적으로 계산하는 구조가 구현되면, 변수가 많은
+                실제 문제에서 진정한 양자 이점을 실현할 수 있습니다.
+                """
+            )
+
+with tabs[1]:
+    # ═══ 왜 인과관계인가 ═══
+    st.markdown(
+        f"""<span class="chapter-num">1</span> <b style="font-size:1.15rem;">상관관계 ≠ 인과관계 — 왜 이 구분이 중요한가</b>""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
         <div class="status-band">
         두 변수가 함께 움직인다고 해서 하나가 다른 하나의 <b>원인</b>은 아닙니다.
-        아이스크림 판매량과 익사 사고가 함께 증가하지만, 아이스크림이 익사를 일으키는 것은 아닙니다 — 공통 원인(여름 기온)이 존재합니다.
-        <b>인과관계</b>를 알아야 "어디에 개입해야 결과가 바뀌는지" 답할 수 있습니다.
+        아이스크림 판매량과 익사 사고가 함께 증가하지만, 아이스크림이 익사를 일으키는 것은 아닙니다 — 공통 원인(여름 기온)이 존재합니다.<br><br>
+        지금 분석 중인 <b>{dataset_name}</b> 데이터에서도 마찬가지입니다.
+        <b>{', '.join(variables)}</b> 사이에 높은 상관관계가 있더라도,
+        그것만으로는 <b>"{outcome}을 바꾸려면 어디를 건드려야 하는가"</b>에 답할 수 없습니다.
+        아래에서 이 데이터의 상관관계를 직접 확인해 보세요.
         </div>
         """,
         unsafe_allow_html=True,
@@ -1889,16 +2465,43 @@ with tabs[0]:
         else:
             st.info("이 데이터셋에는 알려진 정답 구조가 없습니다. 발견된 구조를 직접 평가해야 합니다.")
 
-with tabs[1]:
+    # ── 핵심 발견 & 다음 단계 ──
+    st.markdown(
+        f"""
+        <div class="finding-card">
+            <div class="finding-label">이 탭의 핵심</div>
+            <div class="finding-body">
+            <b>{', '.join(variables)}</b>의 상관행렬을 확인했습니다.
+            상관관계는 변수 간 <b>선형적 동조 여부</b>만 보여줄 뿐, 어느 변수가 다른 변수의 <b>원인</b>인지,
+            개입했을 때 결과가 <b>실제로 바뀌는지</b>는 알려주지 않습니다.
+            이 한계를 극복하기 위해 <b>인과 구조(DAG)</b>를 데이터로부터 직접 찾아야 합니다.
+            </div>
+        </div>
+        <div class="nextstep-card">
+            <div class="nextstep-label">다음 단계 →  인과 구조 발견</div>
+            <div class="nextstep-body">
+            다음 탭에서는 {n_total:,}개의 가능한 DAG 후보 중 데이터에 가장 부합하는 구조를 <b>BDeu 점수</b>로 자동 탐색합니다.
+            {f'문헌의 정답 구조와 비교하여 발견 정확도도 평가합니다.' if has_ground_truth else ''}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with tabs[2]:
     # ═══ 인과 구조 발견 ═══
-    st.subheader("데이터에서 인과 구조 발견하기")
+    st.markdown(
+        f"""<span class="chapter-num">2</span> <b style="font-size:1.15rem;">데이터가 지지하는 인과 구조 찾기</b>""",
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         f"""
         <div class="status-band">
-        {len(variables)}개 변수 사이의 가능한 방향 엣지 {n_edges}개로 구성되는 DAG 후보 {n_total:,}개 중
-        비순환 조건을 만족하는 <b>{len(valid_dags):,}개</b>를 전수 평가합니다.
-        각 DAG의 BDeu 점수(ESS={ess})를 계산해 데이터에 가장 부합하는 구조를 찾습니다.
+        앞서 상관관계만으로는 인과를 알 수 없다는 것을 확인했습니다.
+        이제 <b>{', '.join(variables)}</b> 사이에 가능한 인과 화살표 {n_edges}개로 구성되는 DAG 후보 <b>{n_total:,}개</b>를 전수 평가합니다.<br>
+        각 DAG에 <b>BDeu 점수</b>(데이터와의 적합도)를 매겨, 관측 데이터를 가장 잘 설명하는 인과 구조를 찾습니다.
+        점수가 높을수록 "이 인과 관계가 데이터에 의해 지지된다"는 뜻입니다.
         </div>
         """,
         unsafe_allow_html=True,
@@ -1976,9 +2579,37 @@ with tabs[1]:
         if _cached_s:
             render_ai_box(_cached_s)
 
-with tabs[2]:
+    # ── 핵심 발견 & 다음 단계 ──
+    _finding2_edges = format_edges(best_graph.edges())
+    _finding2_f1 = f" (정답 대비 F1={best_metrics['f1']:.2f})" if best_metrics else ""
+    st.markdown(
+        f"""
+        <div class="finding-card">
+            <div class="finding-label">이 탭의 핵심</div>
+            <div class="finding-body">
+            {len(valid_dags):,}개의 유효 DAG 중 데이터에 가장 부합하는 구조는 <b>{_finding2_edges}</b>입니다{_finding2_f1}.
+            이 구조는 "{', '.join(variables)}" 사이에서 <b>어떤 변수가 어떤 변수의 원인인지</b>를 보여줍니다.
+            하지만 이것만으로는 "그래서 뭘 해야 하는가?"에 답이 되지 않습니다.
+            </div>
+        </div>
+        <div class="nextstep-card">
+            <div class="nextstep-label">다음 단계 → 개입 추천</div>
+            <div class="nextstep-body">
+            발견된 인과 구조를 활용해, <b>{outcome}</b>을 {'높이' if outcome_higher_is_better else '줄이'}기 위해
+            어떤 변수에 개입(do-intervention)해야 가장 효과적인지 계산합니다.
+            인과 구조를 아는 것의 <b>실질적 가치</b>가 바로 다음 탭에서 드러납니다.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with tabs[3]:
     # ═══ 개입 추천 (THE STAR) ═══
-    st.subheader("어디에 개입해야 하는가?")
+    st.markdown(
+        f"""<span class="chapter-num">3</span> <b style="font-size:1.15rem;">어디에 개입해야 {outcome}이 바뀌는가</b>""",
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         f"""
@@ -2136,17 +2767,54 @@ with tabs[2]:
         if _cached_i:
             render_ai_box(_cached_i)
 
-with tabs[3]:
+    # ── 핵심 발견 & 다음 단계 ──
+    if _intro_has_intv:
+        _finding3_text = (
+            f"발견된 인과 구조 기준으로, <b>{outcome}</b>에 가장 큰 영향을 주는 변수는 "
+            f"<b>{_intro_top['target']}</b>이며, 권장 행동은 <b>{_intro_top['recommended_action']}</b>입니다. "
+            f"이것이 바로 상관관계가 아닌 <b>인과관계</b>를 알아야만 내릴 수 있는 판단입니다."
+        )
+    else:
+        _finding3_text = (
+            f"현재 선택한 DAG 기준으로는 추천 가능한 개입 타겟이 없습니다. "
+            f"이는 후보 변수에서 {outcome}으로 향하는 인과 경로가 없거나, 효과가 0이라는 뜻입니다. "
+            f"정답 구조를 기준으로 보거나 결과 변수를 바꾸면 다른 결과가 나올 수 있습니다."
+        )
+    st.markdown(
+        f"""
+        <div class="finding-card">
+            <div class="finding-label">이 탭의 핵심</div>
+            <div class="finding-body">{_finding3_text}</div>
+        </div>
+        <div class="nextstep-card">
+            <div class="nextstep-label">다음 단계 → 양자적 접근</div>
+            <div class="nextstep-body">
+            지금까지 고전적 방법(전수 탐색)으로 최적 DAG를 찾았습니다.
+            다음 탭에서는 같은 문제를 <b>양자 컴퓨팅(Grover 알고리즘)</b>으로 접근합니다.
+            {n_total:,}개 후보를 모두 검사하는 대신, 양자 간섭을 이용해 좋은 구조를 <b>더 높은 확률로</b> 찾아내는 실험입니다.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with tabs[4]:
     # ═══ 양자적 접근 ═══
-    st.subheader("양자적 시도: Grover 알고리즘")
+    st.markdown(
+        f"""<span class="chapter-num">4</span> <b style="font-size:1.15rem;">양자 컴퓨팅으로 같은 문제에 도전하다</b>""",
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         f"""
         <div class="status-band">
-        인과 구조 탐색은 본질적으로 조합 최적화 문제입니다. DAG 후보 공간이 변수 수에 따라 기하급수적으로 커지므로,
-        비정렬 탐색에서 이차 속도향상을 제공하는 <b>Grover 알고리즘</b>을 적용해 봅니다.<br><br>
-        각 엣지 후보를 큐비트 하나로 인코딩합니다. 현재 설정: <b>{n_edges}큐비트</b>,
-        BDeu 상위 <b>{top_k_effective}개</b> bitstring을 Oracle 타겟으로 설정합니다.
+        앞선 탭에서 <b>{len(valid_dags):,}개</b> DAG를 하나씩 전수 검사하여 최적 구조를 찾았습니다.
+        하지만 변수가 늘어나면 이 방법은 현실적으로 불가능해집니다.
+        <b>Grover 알고리즘</b>은 이런 비정렬 탐색 문제에서 검색 횟수를 제곱근 수준으로 줄여주는 양자 알고리즘입니다.<br><br>
+        <b>작동 원리</b>: {n_edges}개 엣지 후보 각각을 큐비트 1개로 인코딩 → 모든 후보를 양자 중첩 상태로 동시에 준비 →
+        BDeu 상위 <b>{top_k_effective}개</b> DAG를 "정답"으로 표시(Oracle) →
+        양자 간섭으로 정답의 측정 확률을 증폭(Diffuser) → 측정하면 좋은 구조가 높은 확률로 나옴.
+        <br><b>아래 버튼을 눌러 직접 실행해보세요.</b>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2309,9 +2977,59 @@ with tabs[3]:
             """
         )
 
-with tabs[4]:
+    # ── 핵심 발견 & 다음 단계 ──
+    _grover_done = st.session_state.get("grover_result") is not None and st.session_state.get("grover_run_key") == run_key
+    if _grover_done:
+        _gr = st.session_state["grover_result"]
+        _uniform_pct = top_k_effective / (2**n_edges) * 100
+        _amp_ratio = _gr["good_probability"] * 100 / _uniform_pct if _uniform_pct > 0 else 0
+        _finding4_text = (
+            f"Grover 회로 실행 결과, Oracle 적중률은 <b>{_gr['good_probability']*100:.1f}%</b>로 "
+            f"균등 분포 기준 <b>{_uniform_pct:.1f}%</b> 대비 약 <b>{_amp_ratio:.1f}배</b> 증폭되었습니다. "
+            f"이는 양자 간섭을 통해 고득점 DAG가 측정될 확률이 유의미하게 높아졌다는 뜻입니다."
+        )
+    else:
+        _finding4_text = (
+            "아직 Grover 회로를 실행하지 않았습니다. "
+            "위의 <b>'Grover 실행'</b> 버튼을 눌러 양자 탐색을 직접 실행해보세요. "
+            "실행 후 진폭 증폭 효과를 측정 분포 차트에서 확인할 수 있습니다."
+        )
+    st.markdown(
+        f"""
+        <div class="finding-card">
+            <div class="finding-label">이 탭의 핵심</div>
+            <div class="finding-body">{_finding4_text}</div>
+        </div>
+        <div class="nextstep-card">
+            <div class="nextstep-label">다음 단계 → 종합 분석</div>
+            <div class="nextstep-body">
+            마지막 탭에서 고전 탐색과 양자 탐색의 결과를 나란히 비교하고,
+            인과 구조 발견 → 개입 추천 → 양자 가속까지 전체 파이프라인의 종합 판단을 내립니다.
+            {f'Groq API를 연결했다면 AI 종합 보고서도 생성할 수 있습니다.' if ai_enabled else ''}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with tabs[5]:
     # ═══ 종합 분석 ═══
-    st.subheader("인과 및 양자 분석 최종 대시보드")
+    st.markdown(
+        f"""<span class="chapter-num">5</span> <b style="font-size:1.15rem;">종합 판단 — 무엇을 알았고, 무엇을 해야 하는가</b>""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
+        <div class="status-band" style="border-left-color: #059669; background: linear-gradient(90deg, #ecfdf5 0%, #f8fafc 100%);">
+        지금까지의 분석을 정리합니다.
+        <b>{dataset_name}</b> 데이터에서 인과 구조를 발견하고(2탭), 개입 타겟을 추천하고(3탭),
+        양자 알고리즘으로 탐색 가속을 시연했습니다(4탭).
+        아래에서 고전 vs 양자 성능을 나란히 비교하고, 전체 분석의 결론을 확인하세요.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     active_grover_r = st.session_state.get("grover_result")
     grover_active = active_grover_r is not None and st.session_state.get("grover_run_key") == run_key
@@ -2479,3 +3197,35 @@ with tabs[4]:
                 """,
                 unsafe_allow_html=True,
             )
+
+    # ── 전체 결론 ──
+    st.divider()
+    _concl_intv_text = (
+        f"개입 추천: <b>{_intro_top['target']}</b>에 <b>{_intro_top['recommended_action']}</b> 조치가 가장 효과적"
+        if _intro_has_intv
+        else "현재 구조 기준으로는 명확한 개입 타겟이 도출되지 않았으며, 추가 분석이 필요"
+    )
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
+            border-radius: 16px;
+            padding: 2rem 2.2rem;
+            margin: 0.5rem 0;
+            color: #e2e8f0;
+        ">
+            <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #a5b4fc; margin-bottom: 0.5rem; font-weight: 700;">전체 분석 결론</div>
+            <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.8rem; line-height: 1.4;">
+                {dataset_name} — {outcome}을 {'높이' if outcome_higher_is_better else '줄이'}기 위한 인과 기반 의사결정
+            </div>
+            <div style="font-size: 0.92rem; color: #cbd5e1; line-height: 1.7;">
+                <b style="color:#a5b4fc;">1. 인과 구조</b>: {len(valid_dags):,}개 후보 중 <b>{format_edges(best_graph.edges())}</b>가 데이터에 가장 부합{f' (F1={best_metrics["f1"]:.2f})' if best_metrics else ''}.<br>
+                <b style="color:#a5b4fc;">2. 개입 전략</b>: {_concl_intv_text}.<br>
+                <b style="color:#a5b4fc;">3. 양자 시도</b>: {n_edges}큐비트 Grover 회로로 인과 구조 탐색을 양자 도메인에 정식화. 전수조사 O({n_total:,}) 대비 O({int(math.sqrt(n_total))}) 이차 속도 향상의 가능성을 시연.<br>
+                <b style="color:#a5b4fc;">4. 제작 의도</b>: 이 시스템은 "상관관계를 넘어 인과관계를 기반으로 의사결정을 내리는 것"의 가치를 보여주기 위해 제작되었습니다.
+                양자 알고리즘을 실제 데이터 과학 문제에 접목한 방법론적 시도이자, 비전문가도 인과 추론 결과를 이해하고 활용할 수 있도록 설계된 의사결정 지원 도구입니다.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
