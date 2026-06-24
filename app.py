@@ -2330,6 +2330,268 @@ st.markdown(
         font-size: 0.9rem;
         line-height: 1.65;
     }
+
+    /* ── Product UI refresh: calm, data-first visual system ── */
+    :root {
+        --ink: #172033;
+        --muted: #667085;
+        --line: #e7eaf0;
+        --surface: #ffffff;
+        --canvas: #f8fafc;
+        --accent: #3659d9;
+        --accent-soft: #eef2ff;
+        --success: #027a62;
+    }
+    .stApp {
+        background: var(--canvas);
+        color: var(--ink);
+    }
+    .block-container {
+        max-width: 1220px;
+        padding-top: 1.5rem;
+        padding-bottom: 4rem;
+    }
+    h1, h2, h3, h4 {
+        color: var(--ink) !important;
+        letter-spacing: -0.025em !important;
+    }
+    h2 { font-size: 1.35rem !important; margin-top: 1.8rem !important; }
+    h3 { font-size: 1.08rem !important; margin-top: 1.25rem !important; }
+
+    section[data-testid="stSidebar"] {
+        background: #ffffff;
+        border-right: 1px solid var(--line);
+    }
+    section[data-testid="stSidebar"] * { color: var(--ink) !important; }
+    section[data-testid="stSidebar"] h1 {
+        font-size: 1rem !important;
+        letter-spacing: -0.01em !important;
+        margin-bottom: 1.25rem;
+    }
+    section[data-testid="stSidebar"] .stSelectbox label,
+    section[data-testid="stSidebar"] .stMultiSelect label,
+    section[data-testid="stSidebar"] .stSlider label,
+    section[data-testid="stSidebar"] .stRadio label {
+        color: var(--muted) !important;
+        font-size: 0.72rem;
+        letter-spacing: 0.06em;
+    }
+    section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+    section[data-testid="stSidebar"] [data-baseweb="input"] > div,
+    section[data-testid="stSidebar"] textarea {
+        background: #fbfcfe !important;
+        border-color: #dfe3eb !important;
+        border-radius: 8px !important;
+        box-shadow: none;
+    }
+    section[data-testid="stSidebar"] hr { border-color: var(--line); }
+
+    .hero-container {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        padding: 2.1rem 2.2rem;
+        margin-bottom: 1.1rem;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.10);
+    }
+    .hero-container::before { display: none; }
+    .hero-container .hero-title, .hero-title {
+        font-size: 1.7rem !important;
+        letter-spacing: -0.035em !important;
+        text-shadow: none !important;
+        margin-bottom: 0.65rem;
+    }
+    .hero-container .hero-subtitle, .hero-subtitle {
+        color: #cbd5e1 !important;
+        font-size: 0.92rem !important;
+        max-width: 760px;
+        line-height: 1.65;
+    }
+    .hero-badge {
+        background: rgba(255,255,255,0.08);
+        border-color: rgba(255,255,255,0.14);
+        color: #dbeafe;
+        border-radius: 5px;
+        padding: 0.22rem 0.5rem;
+        font-size: 0.66rem;
+        margin-bottom: 0.85rem;
+    }
+
+    div[data-testid="stMetric"] {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        padding: 0.9rem 1rem;
+        box-shadow: none;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: none;
+        border-color: #cbd5e1;
+        box-shadow: 0 2px 7px rgba(15, 23, 42, 0.04);
+    }
+    div[data-testid="stMetric"] label {
+        color: var(--muted) !important;
+        font-size: 0.68rem !important;
+        letter-spacing: 0.055em;
+    }
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+        color: var(--ink) !important;
+        font-size: 1.38rem;
+        letter-spacing: -0.035em;
+    }
+
+    .stTabs [data-baseweb="tab-list"] {
+        background: transparent;
+        border-radius: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 0;
+        gap: 1.25rem;
+        overflow-x: auto;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 0;
+        padding: 0.72rem 0.1rem 0.6rem;
+        color: var(--muted);
+        font-size: 0.83rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    .stTabs [aria-selected="true"] {
+        background: transparent !important;
+        color: var(--accent) !important;
+        box-shadow: inset 0 -2px 0 var(--accent);
+    }
+
+    .stButton > button[kind="primary"], .stDownloadButton > button {
+        background: var(--accent);
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        box-shadow: none;
+        font-size: 0.84rem;
+        padding: 0.52rem 0.9rem;
+    }
+    .stButton > button[kind="primary"]:hover, .stDownloadButton > button:hover {
+        background: #2d4cc2;
+        border-color: #2d4cc2;
+        transform: none;
+        box-shadow: none;
+    }
+    .stButton > button:not([kind="primary"]) {
+        border-radius: 8px;
+        border-color: #d0d5dd;
+        color: #344054;
+        font-size: 0.84rem;
+    }
+
+    .status-band, .intro-accent, .upload-empty-state {
+        background: var(--surface) !important;
+        border: 1px solid var(--line) !important;
+        border-left: 3px solid var(--accent) !important;
+        border-radius: 8px !important;
+        color: #475467 !important;
+        padding: 0.95rem 1.05rem;
+        box-shadow: none;
+    }
+    .value-props { gap: 0.7rem; margin-bottom: 1.1rem; }
+    .value-card, .concept-card, .step-card, .intro-section {
+        background: var(--surface) !important;
+        border: 1px solid var(--line) !important;
+        border-radius: 9px !important;
+        box-shadow: none !important;
+    }
+    .value-card {
+        text-align: left;
+        padding: 1rem 1.05rem;
+    }
+    .value-card:hover, .concept-card:hover { transform: none; box-shadow: none !important; }
+    .value-icon {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin-bottom: 0.65rem;
+        opacity: 1;
+    }
+    .value-title, .concept-card .concept-term, .step-card .step-title { color: var(--ink); }
+    .value-desc, .concept-card .concept-desc, .step-card .step-desc { color: var(--muted); }
+    .concept-card .concept-term { color: var(--accent); }
+    .step-flow { gap: 0.55rem; }
+    .step-card { min-width: 160px; padding: 0.85rem 0.9rem; }
+    .step-card .step-num, .chapter-num {
+        background: var(--accent);
+        border-radius: 5px;
+        width: 21px;
+        height: 21px;
+        line-height: 21px;
+        box-shadow: none;
+    }
+
+    .finding-card, .nextstep-card {
+        background: var(--surface) !important;
+        border: 1px solid var(--line) !important;
+        border-left: 3px solid var(--accent) !important;
+        border-radius: 8px !important;
+        padding: 1rem 1.1rem;
+        margin: 1rem 0 0.45rem;
+    }
+    .finding-card .finding-label, .nextstep-card .nextstep-label { color: var(--accent); }
+    .finding-card .finding-body, .nextstep-card .nextstep-body { color: #475467; }
+    .decision-card {
+        background: var(--surface) !important;
+        color: var(--ink) !important;
+        border: 1px solid var(--line) !important;
+        border-left: 3px solid var(--success) !important;
+        border-radius: 9px !important;
+        box-shadow: none !important;
+        padding: 1.2rem 1.3rem !important;
+    }
+    .decision-card.neutral { border-left-color: #98a2b3 !important; }
+    .decision-card div { color: var(--ink) !important; opacity: 1 !important; }
+    .summary-card {
+        background: #111827 !important;
+        border: 1px solid #1f2937 !important;
+        border-radius: 10px !important;
+        box-shadow: none !important;
+        padding: 1.7rem 1.8rem !important;
+    }
+
+    .quantum-highlight {
+        background: #172033;
+        border: 1px solid #27334a;
+        border-radius: 10px;
+        box-shadow: none;
+    }
+    .guide-banner, .reflection-box {
+        background: var(--surface) !important;
+        border: 1px solid var(--line) !important;
+        border-radius: 9px;
+        box-shadow: none;
+    }
+    .guide-banner { border-left: 3px solid var(--success) !important; }
+    .guide-banner h4, .guide-banner p { color: var(--ink) !important; }
+    .reflection-box { border-left: 3px solid #d0a700 !important; }
+    .reflection-box h4 { color: #7a5a00; }
+    .reflection-box p { color: #667085; }
+    .streamlit-expanderHeader {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+    }
+    .stAlert > div {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+    }
+    .stDataFrame { border: 1px solid var(--line); border-radius: 8px; }
+    hr { border-color: var(--line); margin: 1.25rem 0; }
+    @media (max-width: 760px) {
+        .block-container { padding: 1rem 0.85rem 2.5rem; }
+        .hero-container { padding: 1.45rem 1.2rem; }
+        .hero-container .hero-title, .hero-title { font-size: 1.4rem !important; }
+        .value-props { grid-template-columns: 1fr; }
+        .concept-grid { grid-template-columns: 1fr; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -2654,14 +2916,12 @@ st.markdown(
     f"""
     <div class="hero-container">
         <div class="hero-badge">Quantum Causal Discovery Lab</div>
-        <div class="hero-title" style="color:#f8fafc !important;font-size:1.85rem;font-weight:800;line-height:1.22;text-shadow:0 2px 18px rgba(0,0,0,0.35);">
-            데이터에서 '진짜 원인'을 찾아, 가장 효과적인 개입 지점을 추천합니다
+        <div class="hero-title">
+            Causal Discovery Workspace
         </div>
-        <div class="hero-subtitle" style="color:#dbeafe !important;font-size:0.95rem;line-height:1.5;max-width:920px;">
-            "두 변수가 함께 움직인다"는 것은 하나가 다른 하나의 원인이라는 뜻이 아닙니다.
-            이 시스템은 관측 데이터에서 변수 간 <b>숨겨진 인과 구조</b>를 자동으로 발견하고,
-            <b>어떤 변수를 조절해야 원하는 결과를 얻을 수 있는지</b> 개입 전략을 추천합니다.
-            탐색 과정에 양자 컴퓨팅(Grover 알고리즘)을 접목해 속도 향상 가능성을 시연합니다.
+        <div class="hero-subtitle">
+            관측 데이터에서 구조를 탐색하고, 개입 후보의 효과와 불확실성을 비교합니다.
+            양자 탐색은 동일한 구조 탐색 문제를 다른 계산 모델로 검증하는 실험 트랙입니다.
         </div>
     </div>
     """,
@@ -2672,19 +2932,19 @@ st.markdown(
     """
     <div class="value-props">
         <div class="value-card">
-            <div class="value-icon">🔍</div>
+            <div class="value-icon">01</div>
             <div class="value-title">인과 구조 자동 발견</div>
-            <div class="value-desc">수천 개의 가능한 인과 그래프 중<br>데이터에 가장 부합하는 구조를 찾습니다</div>
+            <div class="value-desc">관측 데이터에 가장 잘 맞는 DAG를 점수 기반으로 비교합니다.</div>
         </div>
         <div class="value-card">
-            <div class="value-icon">🎯</div>
+            <div class="value-icon">02</div>
             <div class="value-title">개입 타겟 추천</div>
-            <div class="value-desc">결과를 바꾸려면 어떤 변수를<br>조절해야 하는지 순위를 매겨 추천합니다</div>
+            <div class="value-desc">효과 크기와 Bootstrap 신뢰도를 함께 확인합니다.</div>
         </div>
         <div class="value-card">
-            <div class="value-icon">⚛️</div>
+            <div class="value-icon">03</div>
             <div class="value-title">양자 알고리즘 접목</div>
-            <div class="value-desc">Grover 탐색으로 최적 구조를 찾는<br>속도를 이론적으로 제곱근만큼 단축합니다</div>
+            <div class="value-desc">회로 자원과 노이즈 민감도를 포함해 실험 결과를 봅니다.</div>
         </div>
     </div>
     """,
@@ -3325,13 +3585,7 @@ with tabs[3]:
             confidence_label, confidence_bg, confidence_fg = coverage_confidence(float(best_intv["coverage"]))
             st.markdown(
                 f"""
-                <div style="
-                    background: linear-gradient(135deg, #059669 0%, #047857 100%);
-                    border-radius: 12px;
-                    padding: 1.3rem 1.5rem;
-                    margin: 1rem 0;
-                    color: #ffffff;
-                ">
+                <div class="decision-card">
                     <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85; margin-bottom: 0.3rem;">추천 개입 타겟</div>
                     <div style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.2rem;">{best_intv['target']} ({direction_icon}{abs(effect_val):.4f})</div>
                     <div style="font-size: 0.95rem; opacity: 0.9;">
@@ -3349,13 +3603,7 @@ with tabs[3]:
         else:
             st.markdown(
                 f"""
-                <div style="
-                    background: linear-gradient(135deg, #475569 0%, #334155 100%);
-                    border-radius: 12px;
-                    padding: 1.3rem 1.5rem;
-                    margin: 1rem 0;
-                    color: #ffffff;
-                ">
+                <div class="decision-card neutral">
                     <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85; margin-bottom: 0.3rem;">개입 추천 결과</div>
                     <div style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.2rem;">추천 가능한 개입 없음</div>
                     <div style="font-size: 0.95rem; opacity: 0.9;">
@@ -4181,13 +4429,7 @@ with tabs[5]:
     )
     st.markdown(
         f"""
-        <div style="
-            background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
-            border-radius: 16px;
-            padding: 2rem 2.2rem;
-            margin: 0.5rem 0;
-            color: #e2e8f0;
-        ">
+        <div class="summary-card">
             <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #a5b4fc; margin-bottom: 0.5rem; font-weight: 700;">전체 분석 결론</div>
             <div style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.8rem; line-height: 1.4;">
                 {dataset_name} — {outcome}을 {'높이' if outcome_higher_is_better else '줄이'}기 위한 인과 기반 의사결정
