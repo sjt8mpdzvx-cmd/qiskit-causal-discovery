@@ -21,37 +21,7 @@ def _load_qiskit():
     return QuantumCircuit, AerSimulator
 
 
-def _apply_pattern_phase(qc, qubits, bitstring, phase):
-    """Apply ``exp(i * phase)`` only to one computational-basis pattern.
-
-    ``RZ`` wrapped by an MCX is *not* a multi-controlled phase gate: it
-    rotates the target qubit and mixes computational-basis states.  QAOA's
-    cost operator must stay diagonal, so use a controlled ``PhaseGate``.
-    """
-    from qiskit.circuit.library import PhaseGate
-
-    if len(qubits) != len(bitstring):
-        raise ValueError("bitstring length must match the number of qubits")
-    if not qubits:
-        raise ValueError("at least one qubit is required")
-
-    flipped = []
-    for qubit, bit in zip(qubits, bitstring):
-        if bit not in {"0", "1"}:
-            raise ValueError("bitstrings must contain only '0' and '1'")
-        if bit == "0":
-            qc.x(qubit)
-            flipped.append(qubit)
-
-    if len(qubits) == 1:
-        qc.p(phase, qubits[0])
-    else:
-        target = qubits[-1]
-        gate = PhaseGate(phase).control(len(qubits) - 1)
-        qc.append(gate, list(qubits[:-1]) + [target])
-
-    for qubit in reversed(flipped):
-        qc.x(qubit)
+from .dag_utils import _apply_pattern_phase  # noqa: E402 – shared diagonal phase utility
 
 
 def build_cost_operator(n_qubits, scored_dags, gamma):

@@ -21,31 +21,7 @@ def _load_qiskit():
     return QuantumCircuit, AerSimulator
 
 
-def _apply_pattern_phase(qc, qubits, bitstring, phase):
-    """Apply a diagonal conditional phase to one computational-basis state."""
-    from qiskit.circuit.library import PhaseGate
-
-    if len(qubits) != len(bitstring):
-        raise ValueError("bitstring length must match the number of qubits")
-    if not qubits:
-        raise ValueError("at least one qubit is required")
-
-    flipped = []
-    for qubit, bit in zip(qubits, bitstring):
-        if bit not in {"0", "1"}:
-            raise ValueError("bitstrings must contain only '0' and '1'")
-        if bit == "0":
-            qc.x(qubit)
-            flipped.append(qubit)
-
-    if len(qubits) == 1:
-        qc.p(phase, qubits[0])
-    else:
-        target = qubits[-1]
-        qc.append(PhaseGate(phase).control(len(qubits) - 1), list(qubits[:-1]) + [target])
-
-    for qubit in reversed(flipped):
-        qc.x(qubit)
+from .dag_utils import _apply_pattern_phase  # noqa: E402 – shared diagonal phase utility
 
 
 def build_oracle(n_qubits, good_bitstrings):

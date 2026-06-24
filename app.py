@@ -1800,47 +1800,14 @@ st.markdown(
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
     /* ── Global ── */
-    .block-container {
-        padding-top: 2.75rem;
-        padding-bottom: 3rem;
-        max-width: 1280px;
-    }
     html, body, [class*="css"] {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
-    /* ── Sidebar ── */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-    }
-    section[data-testid="stSidebar"] * {
-        color: #e2e8f0 !important;
-    }
-    section[data-testid="stSidebar"] .stSelectbox label,
-    section[data-testid="stSidebar"] .stMultiSelect label,
-    section[data-testid="stSidebar"] .stSlider label,
-    section[data-testid="stSidebar"] .stRadio label {
-        color: #94a3b8 !important;
-        font-size: 0.82rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-weight: 600;
-    }
-    section[data-testid="stSidebar"] hr {
-        border-color: #334155;
-    }
+    /* ── Sidebar (selectors not overridden below) ── */
     section[data-testid="stSidebar"] .stSlider [data-testid="stTickBarMin"],
     section[data-testid="stSidebar"] .stSlider [data-testid="stTickBarMax"] {
         color: #64748b !important;
-    }
-    section[data-testid="stSidebar"] [data-baseweb="select"] > div,
-    section[data-testid="stSidebar"] [data-baseweb="input"] > div,
-    section[data-testid="stSidebar"] textarea {
-        background: #ffffff !important;
-        border: 1px solid #cbd5e1 !important;
-        border-radius: 10px !important;
-        color: #0f172a !important;
-        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
     }
     section[data-testid="stSidebar"] [data-baseweb="select"] span,
     section[data-testid="stSidebar"] [data-baseweb="select"] div,
@@ -1876,103 +1843,7 @@ st.markdown(
         color: #334155 !important;
     }
 
-    /* ── Hero header ── */
-    .hero-container {
-        background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
-        border-radius: 16px;
-        padding: 2.2rem 2.5rem;
-        margin-bottom: 1.5rem;
-        position: relative;
-        overflow: hidden;
-    }
-    .hero-container::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        right: -20%;
-        width: 400px;
-        height: 400px;
-        background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%);
-        pointer-events: none;
-    }
-    .hero-container .hero-title,
-    .hero-title {
-        display: block;
-        font-size: 1.85rem !important;
-        line-height: 1.22 !important;
-        font-weight: 800 !important;
-        color: #f8fafc !important;
-        margin: 0 0 0.3rem 0;
-        letter-spacing: 0;
-        text-shadow: 0 2px 18px rgba(0,0,0,0.35);
-    }
-    .hero-container .hero-subtitle,
-    .hero-subtitle {
-        display: block;
-        font-size: 0.95rem !important;
-        color: #dbeafe !important;
-        margin: 0;
-        line-height: 1.5;
-        max-width: 920px;
-    }
-    .hero-badge {
-        display: inline-block;
-        background: rgba(99,102,241,0.2);
-        border: 1px solid rgba(99,102,241,0.3);
-        color: #a5b4fc;
-        font-size: 0.72rem;
-        font-weight: 600;
-        padding: 0.2rem 0.65rem;
-        border-radius: 20px;
-        margin-bottom: 0.7rem;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-    }
-
-    /* ── Metric cards ── */
-    div[data-testid="stMetric"] {
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 1rem 1.1rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-    div[data-testid="stMetric"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    }
-    div[data-testid="stMetric"] label {
-        color: #64748b !important;
-        font-size: 0.78rem !important;
-        font-weight: 600 !important;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-        color: #0f172a !important;
-        font-weight: 700 !important;
-    }
-
-    /* ── Tabs ── */
-    .stTabs [data-baseweb="tab-list"] {
-        background: #f1f5f9;
-        border-radius: 12px;
-        padding: 4px;
-        gap: 4px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 8px;
-        font-weight: 600;
-        font-size: 0.88rem;
-        padding: 0.5rem 1.2rem;
-        color: #64748b;
-    }
-    .stTabs [aria-selected="true"] {
-        background: #ffffff !important;
-        color: #0f172a !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    }
+    /* ── Tabs (selectors not overridden below) ── */
     .stTabs [data-baseweb="tab-highlight"] {
         display: none;
     }
@@ -1980,159 +1851,9 @@ st.markdown(
         display: none;
     }
 
-    /* ── Buttons ── */
-    .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-        border: none;
-        border-radius: 10px;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-        padding: 0.6rem 1.5rem;
-        box-shadow: 0 2px 8px rgba(99,102,241,0.3);
-        transition: all 0.2s ease;
-    }
-    .stButton > button[kind="primary"]:hover {
-        box-shadow: 0 4px 16px rgba(99,102,241,0.4);
-        transform: translateY(-1px);
-    }
-
-    /* ── Expanders ── */
-    .streamlit-expanderHeader {
-        font-weight: 600;
-        font-size: 0.9rem;
-        color: #334155;
-        background: #f8fafc;
-        border-radius: 8px;
-    }
-
-    /* ── Story band ── */
-    .status-band {
-        border-left: 4px solid #6366f1;
-        background: linear-gradient(90deg, #eef2ff 0%, #f8fafc 100%);
-        padding: 1rem 1.2rem;
-        border-radius: 0 10px 10px 0;
-        margin: 0.4rem 0 1.2rem 0;
-        font-size: 0.92rem;
-        color: #334155;
-        line-height: 1.55;
-    }
-    .upload-empty-state {
-        margin-top: 1.2rem;
-        border-left: 4px solid #2563eb;
-        background: linear-gradient(90deg, #eff6ff 0%, #ffffff 100%);
-        color: #1e3a8a;
-        border-radius: 0 12px 12px 0;
-        padding: 1.2rem 1.4rem;
-        line-height: 1.6;
-        font-size: 0.95rem;
-        max-width: 920px;
-        overflow-wrap: break-word;
-        word-break: keep-all;
-    }
+    /* ── Upload empty-state bold ── */
     .upload-empty-state b {
         color: #1d4ed8;
-    }
-
-    /* ── Value proposition cards ── */
-    .value-props {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: 1rem;
-        margin: 0 0 1.5rem 0;
-    }
-    .value-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        padding: 1.2rem 1.3rem;
-        text-align: center;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-    .value-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    }
-    .value-icon {
-        font-size: 1.6rem;
-        margin-bottom: 0.4rem;
-    }
-    .value-title {
-        font-weight: 700;
-        color: #0f172a;
-        font-size: 0.92rem;
-        margin-bottom: 0.3rem;
-    }
-    .value-desc {
-        font-size: 0.82rem;
-        color: #475569;
-        line-height: 1.5;
-    }
-
-    /* ── Key finding / Next step cards ── */
-    .finding-card {
-        background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
-        border: 1px solid #86efac;
-        border-left: 5px solid #059669;
-        border-radius: 0 14px 14px 0;
-        padding: 1.3rem 1.5rem;
-        margin: 1.2rem 0 0.6rem 0;
-    }
-    .finding-card .finding-label {
-        font-size: 0.75rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: #059669;
-        margin-bottom: 0.4rem;
-    }
-    .finding-card .finding-body {
-        font-size: 0.93rem;
-        color: #1e293b;
-        line-height: 1.6;
-    }
-    .nextstep-card {
-        background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
-        border: 1px solid #a5b4fc;
-        border-left: 5px solid #6366f1;
-        border-radius: 0 14px 14px 0;
-        padding: 1rem 1.3rem;
-        margin: 0.4rem 0 0.5rem 0;
-    }
-    .nextstep-card .nextstep-label {
-        font-size: 0.75rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: #6366f1;
-        margin-bottom: 0.3rem;
-    }
-    .nextstep-card .nextstep-body {
-        font-size: 0.9rem;
-        color: #312e81;
-        line-height: 1.55;
-    }
-    .chapter-num {
-        display: inline-block;
-        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-        color: #ffffff;
-        font-weight: 800;
-        font-size: 0.7rem;
-        width: 22px;
-        height: 22px;
-        line-height: 22px;
-        text-align: center;
-        border-radius: 50%;
-        margin-right: 0.5rem;
-        vertical-align: middle;
-    }
-
-    /* ── Info / Warning / Success boxes ── */
-    .stAlert > div {
-        border-radius: 10px;
-        border: none;
-        word-wrap: break-word;
-        overflow-wrap: break-word;
     }
 
     /* ── Prevent horizontal overflow ── */
@@ -2142,12 +1863,6 @@ st.markdown(
         overflow-wrap: break-word;
     }
 
-    /* ── Dataframe ── */
-    .stDataFrame {
-        border-radius: 10px;
-        overflow: hidden;
-    }
-
     /* ── Small note ── */
     .small-note {
         color: #64748b;
@@ -2155,27 +1870,7 @@ st.markdown(
         line-height: 1.5;
     }
 
-    /* ── Section headers ── */
-    h2, h3 {
-        color: #0f172a;
-        letter-spacing: -0.01em;
-    }
-
-    /* ── Dividers ── */
-    hr {
-        border-color: #e2e8f0;
-        margin: 1.5rem 0;
-    }
-
-    /* ── Project Intro Tab ── */
-    .intro-section {
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        padding: 1.6rem 1.8rem;
-        margin-bottom: 1.2rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
+    /* ── Project Intro Tab (selectors not overridden below) ── */
     .intro-section h4 {
         color: #0f172a;
         font-size: 1.1rem;
@@ -2187,94 +1882,16 @@ st.markdown(
         font-size: 0.92rem;
         line-height: 1.65;
     }
-    .intro-accent {
-        border-left: 4px solid #6366f1;
-        background: linear-gradient(90deg, #eef2ff 0%, #f8fafc 100%);
-        padding: 1.2rem 1.4rem;
-        border-radius: 0 12px 12px 0;
-        margin: 1rem 0;
-        font-size: 0.93rem;
-        color: #1e293b;
-        line-height: 1.6;
-    }
     .concept-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 0.9rem;
         margin: 0.8rem 0;
     }
-    .concept-card {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 1.1rem 1.3rem;
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-    .concept-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    }
-    .concept-card .concept-term {
-        font-weight: 700;
-        color: #4f46e5;
-        font-size: 0.95rem;
-        margin-bottom: 0.3rem;
-    }
     .concept-card .concept-eng {
         font-size: 0.78rem;
         color: #64748b;
         margin-bottom: 0.4rem;
-    }
-    .concept-card .concept-desc {
-        font-size: 0.85rem;
-        color: #334155;
-        line-height: 1.55;
-    }
-    .step-flow {
-        display: flex;
-        gap: 0.8rem;
-        margin: 1rem 0;
-        flex-wrap: wrap;
-    }
-    .step-card {
-        flex: 1;
-        min-width: 180px;
-        background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 1rem 1.1rem;
-        position: relative;
-    }
-    .step-card .step-num {
-        display: inline-block;
-        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-        color: #ffffff;
-        font-weight: 700;
-        font-size: 0.75rem;
-        width: 24px;
-        height: 24px;
-        line-height: 24px;
-        text-align: center;
-        border-radius: 50%;
-        margin-bottom: 0.5rem;
-    }
-    .step-card .step-title {
-        font-weight: 700;
-        color: #0f172a;
-        font-size: 0.88rem;
-        margin-bottom: 0.25rem;
-    }
-    .step-card .step-desc {
-        font-size: 0.82rem;
-        color: #475569;
-        line-height: 1.5;
-    }
-    .quantum-highlight {
-        background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
-        border-radius: 14px;
-        padding: 1.6rem 1.8rem;
-        margin: 1rem 0;
-        color: #e2e8f0;
     }
     .quantum-highlight h4 {
         color: #a5b4fc !important;
@@ -2293,42 +1910,6 @@ st.markdown(
         padding: 0.15rem 0.4rem;
         border-radius: 4px;
         font-size: 0.84rem;
-    }
-    .guide-banner {
-        background: linear-gradient(135deg, #059669 0%, #047857 100%);
-        border-radius: 14px;
-        padding: 1.4rem 1.6rem;
-        margin: 1rem 0;
-        color: #ffffff;
-    }
-    .guide-banner h4 {
-        color: #ffffff !important;
-        font-size: 1.05rem;
-        font-weight: 700;
-        margin: 0 0 0.5rem 0;
-    }
-    .guide-banner p {
-        color: rgba(255,255,255,0.9);
-        font-size: 0.9rem;
-        line-height: 1.6;
-    }
-    .reflection-box {
-        background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
-        border: 1px solid #fde68a;
-        border-radius: 14px;
-        padding: 1.4rem 1.6rem;
-        margin: 1rem 0;
-    }
-    .reflection-box h4 {
-        color: #92400e;
-        font-size: 1.05rem;
-        font-weight: 700;
-        margin: 0 0 0.5rem 0;
-    }
-    .reflection-box p {
-        color: #78350f;
-        font-size: 0.9rem;
-        line-height: 1.65;
     }
 
     /* ── Product UI refresh: calm, data-first visual system ── */
