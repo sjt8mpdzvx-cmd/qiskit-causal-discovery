@@ -1905,14 +1905,7 @@ st.markdown(
         border-right: 1px solid var(--line);
     }
     section[data-testid="stSidebar"] * { color: var(--ink) !important; }
-    section[data-testid="stSidebar"] h1 {
-        font-size: 0.95rem !important;
-        font-weight: 700 !important;
-        letter-spacing: -0.01em !important;
-        margin-bottom: 1.25rem;
-        padding-bottom: 0.75rem;
-        border-bottom: 1px solid var(--line);
-    }
+    /* Sidebar heading is now rendered via .sidebar-control-title */
     section[data-testid="stSidebar"] .stSelectbox label,
     section[data-testid="stSidebar"] .stMultiSelect label,
     section[data-testid="stSidebar"] .stSlider label,
@@ -2029,7 +2022,7 @@ st.markdown(
     .sidebar-control-title {
         color: var(--ink) !important;
         font-size: 1.05rem;
-        font-weight: 750;
+        font-weight: 800;
         letter-spacing: -0.025em;
         margin: 0 0 1rem;
     }
@@ -2544,7 +2537,7 @@ st.markdown(
         right: 0;
         width: 300px;
         height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(21,112,239,0.05));
+        background: linear-gradient(90deg, transparent, rgba(124,92,255,0.05));
         pointer-events: none;
     }
 
@@ -3088,8 +3081,9 @@ st.markdown(
             Causal Discovery Workspace
         </div>
         <div class="hero-subtitle">
-            관측 데이터에서 구조를 탐색하고, 개입 후보의 효과와 불확실성을 비교합니다.
-            양자 탐색은 동일한 구조 탐색 문제를 다른 계산 모델로 검증하는 실험 트랙입니다.
+            "상관관계"가 아닌 "인과관계"를 데이터에서 자동으로 발견하고,
+            어디에 개입해야 결과가 바뀌는지 근거 기반으로 추천합니다.
+            양자 컴퓨팅(Grover 알고리즘)으로 탐색을 가속하는 실험 트랙도 함께 제공됩니다.
         </div>
     </div>
     """,
@@ -3135,31 +3129,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown(
-    """
-    <div class="value-props">
-        <div class="value-card">
-            <div class="value-icon">01</div>
-            <div class="value-title">인과 구조 자동 발견</div>
-            <div class="value-desc">관측 데이터에 가장 잘 맞는 DAG를 점수 기반으로 비교합니다.</div>
-        </div>
-        <div class="value-card">
-            <div class="value-icon">02</div>
-            <div class="value-title">개입 타겟 추천</div>
-            <div class="value-desc">효과 크기와 Bootstrap 신뢰도를 함께 확인합니다.</div>
-        </div>
-        <div class="value-card">
-            <div class="value-icon">03</div>
-            <div class="value-title">양자 알고리즘 접목</div>
-            <div class="value-desc">회로 자원과 노이즈 민감도를 포함해 실험 결과를 봅니다.</div>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(f"<div class='status-band'>{story}</div>", unsafe_allow_html=True)
-
 # Compute intervention for top metric display
 _preview_intervention = intervention_table(data, best_graph, variables, outcome, outcome_higher_is_better)
 if has_actionable_intervention(_preview_intervention):
@@ -3168,6 +3137,42 @@ if has_actionable_intervention(_preview_intervention):
 else:
     _top_target = "-"
     _top_action = "추천 가능한 개입 없음"
+
+_vc_intv = (
+    f'<b>{html.escape(str(_top_target))}</b> — {html.escape(str(_top_action))}'
+    if _top_target != "-"
+    else "효과 크기와 Bootstrap 신뢰도를 함께 확인합니다."
+)
+_vc_quantum = (
+    f"Grover 회로 — {n_edges}큐비트로 {2**n_edges}개 구조를 양자 중첩 탐색합니다."
+    if is_quantum_compatible
+    else f"변수 {len(variables)}개 — Hill-climbing 확장 탐색으로 구조를 학습합니다."
+)
+
+st.markdown(
+    f"""
+    <div class="value-props">
+        <div class="value-card">
+            <div class="value-icon">01</div>
+            <div class="value-title">인과 구조 자동 발견</div>
+            <div class="value-desc">유효 DAG <b>{len(valid_dags):,}개</b>를 {_scoring_label} 점수로 비교해 최적 구조를 선별했습니다.</div>
+        </div>
+        <div class="value-card">
+            <div class="value-icon">02</div>
+            <div class="value-title">개입 타겟 추천</div>
+            <div class="value-desc">{_vc_intv}</div>
+        </div>
+        <div class="value-card">
+            <div class="value-icon">03</div>
+            <div class="value-title">양자 알고리즘 접목</div>
+            <div class="value-desc">{_vc_quantum}</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(f"<div class='status-band'>{story}</div>", unsafe_allow_html=True)
 
 st.markdown(
     """
@@ -3311,8 +3316,17 @@ with tabs[0]:
     st.divider()
 
     # ── 핵심 용어: 펼쳐볼 수 있는 형태 ──
+    st.markdown(
+        """
+        <div class="guide-banner" style="margin-bottom:0.6rem;">
+        <h4 style="margin:0 0 0.3rem;">인과 분석이 처음이라면 여기서 시작하세요</h4>
+        <p style="margin:0;">아래 6개 항목을 펼치면 이 앱에서 쓰이는 핵심 개념을 2분 안에 파악할 수 있습니다.
+        이후 탭의 그래프·점수·개입 분석이 훨씬 쉽게 읽힙니다.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown("#### 처음이라면: 핵심 개념 6가지")
-    st.markdown("<p class='small-note'>각 항목을 펼쳐서 읽어보세요. 이후 탭에서 이 개념들이 실제 데이터에 어떻게 적용되는지 직접 확인하게 됩니다.</p>", unsafe_allow_html=True)
 
     _concept_cols = st.columns(2)
     with _concept_cols[0]:
@@ -3486,7 +3500,7 @@ with tabs[0]:
                 - **QAOA Local**: 전수조사 없이 로컬 점수만으로 cost operator 구성
 
                 **남은 한계**: 시뮬레이터 실행(실제 양자 속도 향상 없음),
-                Markov equivalence(관측 데이터만으로 구분 불가).
+                Markov equivalence — 같은 조건부 독립 관계를 만드는 여러 DAG가 존재하여, 관측 데이터만으로는 방향을 확정할 수 없는 문제.
                 """
             )
 
@@ -3832,6 +3846,12 @@ with tabs[3]:
             )
 
         st.markdown("#### 개입 효과 상세")
+        st.caption(
+            "**target** = 개입 대상 변수 · "
+            "**effect_high_minus_low** = do(high) − do(low) 기대값 차이 (절대값이 클수록 영향력 큼) · "
+            "**coverage** = 추정에 사용된 관측 조합 비율 (1.0 = 모든 조합 관측됨, 낮으면 추정 불확실) · "
+            "**method** = backdoor 보정 사용 여부"
+        )
         st.dataframe(intervention, use_container_width=True, hide_index=True)
 
         st.markdown("#### 개입 추천 신뢰도: Bootstrap 구간")
@@ -3888,7 +3908,7 @@ with tabs[3]:
 
     st.info(
         "이 개입 분석은 관측 데이터와 발견된 DAG에 기반한 근사입니다. "
-        "Positivity 위반(특정 조건 조합에 데이터가 없는 경우) 시 해당 조합은 제외되며 coverage 열에 반영됩니다. "
+        "Positivity 위반 — 특정 부모-변수 조합이 데이터에 한 번도 관측되지 않은 경우 — 이 발생하면 해당 조합은 제외되며, 사용된 관측 비율이 coverage 열에 반영됩니다. "
         "실제 약물 효과나 의료 판단으로 해석하면 안 되며, 프로젝트 데모용 의사결정 보조 지표입니다."
     )
 
@@ -4420,6 +4440,10 @@ with tabs[5]:
         grover_metrics_r = None
 
     # ── Gauges ──
+    st.caption(
+        "**F1** = 정답 엣지 대비 정밀도·재현율의 조화 평균 (1.0 = 완벽 일치) · "
+        "**SHD** (Structural Hamming Distance) = 정답 대비 추가/누락/방향 오류 엣지 수 (0 = 완벽 일치)"
+    )
     if has_ground_truth:
         gauge_cols = st.columns(4 if grover_active else 3)
         with gauge_cols[0]:
