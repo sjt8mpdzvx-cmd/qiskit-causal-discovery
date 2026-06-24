@@ -1822,7 +1822,7 @@ def generate_interpretation(
 
 
 st.set_page_config(
-    page_title="Quantum Causal Discovery Lab",
+    page_title="Q-Causal | Decision Intelligence",
     page_icon="⚛️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1865,6 +1865,9 @@ st.markdown(
         --shadow-lg:  0 12px 16px -4px rgba(16,24,40,0.08), 0 4px 6px -2px rgba(16,24,40,0.03);
         --shadow-xl:  0 20px 24px -4px rgba(16,24,40,0.08), 0 8px 8px -4px rgba(16,24,40,0.03);
         --transition: 150ms cubic-bezier(.4,0,.2,1);
+        --brand-navy: #0b1220;
+        --brand-violet: #7c5cff;
+        --brand-cyan: #39d4c0;
     }
 
     /* ── Global ── */
@@ -1978,10 +1981,99 @@ st.markdown(
         border-radius: var(--radius-sm) !important;
     }
 
+    /* ── Product identity / workspace controls ── */
+    .product-lockup {
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        margin: 0.15rem 0 1.45rem;
+        padding: 0 0 1.15rem;
+        border-bottom: 1px solid var(--line);
+    }
+    .product-mark {
+        width: 32px;
+        height: 32px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+        background: linear-gradient(135deg, var(--brand-violet), #3d7fff);
+        color: #fff;
+        font-size: 0.8rem;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        box-shadow: 0 6px 14px rgba(91, 79, 255, 0.24);
+    }
+    .product-name {
+        color: var(--ink) !important;
+        font-size: 0.82rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+    }
+    .product-subtitle {
+        color: var(--faint) !important;
+        font-size: 0.59rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        margin-top: 0.22rem;
+        text-transform: uppercase;
+    }
+    .sidebar-section-label {
+        color: var(--faint) !important;
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        margin: 0.1rem 0 0.6rem;
+        text-transform: uppercase;
+    }
+    .sidebar-control-title {
+        color: var(--ink) !important;
+        font-size: 1.05rem;
+        font-weight: 750;
+        letter-spacing: -0.025em;
+        margin: 0 0 1rem;
+    }
+    .sidebar-workspace-card {
+        background: linear-gradient(145deg, #f7f8ff, #f5fbff);
+        border: 1px solid #dfe4ff;
+        border-radius: var(--radius-md);
+        margin: 1.1rem 0 0;
+        padding: 0.9rem 0.95rem;
+    }
+    .sidebar-workspace-card .workspace-eyebrow {
+        color: #5b4bcb !important;
+        font-size: 0.6rem;
+        font-weight: 800;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+    }
+    .sidebar-workspace-card .workspace-name {
+        color: var(--ink) !important;
+        font-size: 0.78rem;
+        font-weight: 700;
+        margin: 0.3rem 0 0.55rem;
+        line-height: 1.35;
+    }
+    .sidebar-workspace-card .workspace-state {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        color: var(--muted) !important;
+        font-size: 0.68rem;
+    }
+    .state-dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--success);
+        box-shadow: 0 0 0 3px rgba(7, 148, 85, 0.12);
+    }
+
     /* ── Hero header ── */
     .hero-container {
-        background: linear-gradient(135deg, #101828 0%, #1d2939 100%);
-        border: 1px solid #1d2939;
+        background: radial-gradient(circle at 82% 20%, rgba(57, 212, 192, 0.14), transparent 26%), linear-gradient(135deg, #0b1220 0%, #141b35 55%, #1b2144 100%);
+        border: 1px solid #28335a;
         border-radius: var(--radius-lg);
         padding: 2.4rem 2.8rem;
         margin-bottom: 1.25rem;
@@ -1996,7 +2088,7 @@ st.markdown(
         right: -15%;
         width: 500px;
         height: 500px;
-        background: radial-gradient(circle, rgba(21,112,239,0.12) 0%, transparent 65%);
+        background: radial-gradient(circle, rgba(124,92,255,0.22) 0%, transparent 65%);
         pointer-events: none;
     }
     .hero-container::after {
@@ -2031,10 +2123,12 @@ st.markdown(
         z-index: 1;
     }
     .hero-badge {
-        display: inline-block;
-        background: rgba(21,112,239,0.15);
-        border: 1px solid rgba(21,112,239,0.25);
-        color: #84adff;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        background: rgba(124,92,255,0.15);
+        border: 1px solid rgba(150,131,255,0.34);
+        color: #c5bcff;
         font-size: 0.65rem;
         font-weight: 600;
         padding: 0.22rem 0.6rem;
@@ -2044,6 +2138,147 @@ st.markdown(
         text-transform: uppercase;
         position: relative;
         z-index: 1;
+    }
+    .hero-badge::before {
+        content: '';
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--brand-cyan);
+        box-shadow: 0 0 0 3px rgba(57, 212, 192, 0.16);
+    }
+
+    /* ── Context and workflow rail ── */
+    .workspace-bar {
+        display: flex;
+        align-items: stretch;
+        justify-content: space-between;
+        gap: 1rem;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        padding: 0.8rem 1rem;
+        margin: 0 0 0.75rem;
+        box-shadow: var(--shadow-xs);
+    }
+    .workspace-identity {
+        min-width: 0;
+        padding-right: 1rem;
+        border-right: 1px solid var(--line);
+    }
+    .workspace-label, .section-kicker {
+        color: var(--faint) !important;
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+    }
+    .workspace-title {
+        overflow: hidden;
+        color: var(--ink) !important;
+        font-size: 0.86rem;
+        font-weight: 700;
+        line-height: 1.35;
+        margin-top: 0.25rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .workspace-meta {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.45rem;
+        flex-wrap: wrap;
+    }
+    .workspace-chip {
+        color: var(--ink-soft) !important;
+        background: var(--canvas);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.32rem 0.6rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.66rem;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    .workspace-chip.ready {
+        color: #067647 !important;
+        background: var(--success-soft);
+        border-color: #abefc6;
+        font-family: 'Inter', sans-serif;
+        font-weight: 700;
+    }
+    .workflow-rail {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        margin-bottom: 1.25rem;
+        box-shadow: var(--shadow-xs);
+    }
+    .workflow-step {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.62rem;
+        min-width: 0;
+        padding: 0.72rem 0.85rem;
+        border-right: 1px solid var(--line);
+    }
+    .workflow-step:last-child { border-right: none; }
+    .workflow-index {
+        flex: 0 0 auto;
+        color: var(--accent) !important;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.65rem;
+        font-weight: 700;
+    }
+    .workflow-copy { min-width: 0; }
+    .workflow-title {
+        color: var(--ink-soft) !important;
+        font-size: 0.73rem;
+        font-weight: 700;
+        line-height: 1.2;
+        white-space: nowrap;
+    }
+    .workflow-detail {
+        overflow: hidden;
+        color: var(--faint) !important;
+        font-size: 0.63rem;
+        margin-top: 0.18rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .workflow-step.complete { background: #fbfffd; }
+    .workflow-step.complete::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: var(--success);
+    }
+    .workflow-step.pending { background: #fbfcff; }
+    .workflow-step.pending .workflow-index { color: var(--brand-violet) !important; }
+    .analysis-snapshot {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        margin: 1.2rem 0 0.65rem;
+    }
+    .analysis-snapshot h2 {
+        margin: 0 !important;
+        font-size: 1.05rem !important;
+    }
+    .analysis-snapshot-note {
+        color: var(--muted) !important;
+        font-size: 0.75rem;
+        white-space: nowrap;
     }
 
     /* ── Metric cards ── */
@@ -2490,6 +2725,13 @@ st.markdown(
         .block-container { padding: 1rem 0.85rem 2.5rem; }
         .hero-container { padding: 1.5rem 1.3rem; }
         .hero-container .hero-title, .hero-title { font-size: 1.4rem !important; }
+        .workspace-bar { align-items: flex-start; flex-direction: column; gap: 0.7rem; }
+        .workspace-identity { width: 100%; padding: 0 0 0.7rem; border-right: none; border-bottom: 1px solid var(--line); }
+        .workspace-meta { justify-content: flex-start; }
+        .workflow-rail { grid-template-columns: 1fr 1fr; }
+        .workflow-step:nth-child(2) { border-right: none; }
+        .workflow-step:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+        .analysis-snapshot { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
         .value-props { grid-template-columns: 1fr; }
         .concept-grid { grid-template-columns: 1fr; }
         .step-flow { flex-direction: column; }
@@ -2502,7 +2744,20 @@ st.markdown(
 
 dataset_options = available_datasets()
 
-st.sidebar.title("실험 설정")
+st.sidebar.markdown(
+    """
+    <div class="product-lockup">
+        <div class="product-mark">Q</div>
+        <div>
+            <div class="product-name">Q-CAUSAL</div>
+            <div class="product-subtitle">Decision Intelligence</div>
+        </div>
+    </div>
+    <div class="sidebar-section-label">01 · 분석 환경 구성</div>
+    <div class="sidebar-control-title">실험 설정</div>
+    """,
+    unsafe_allow_html=True,
+)
 data_mode = st.sidebar.radio("데이터 소스", ["내장 데이터셋", "CSV 업로드"], horizontal=False)
 
 uploaded_bytes: bytes | None = None
@@ -2634,6 +2889,17 @@ groq_api_key = st.sidebar.text_input(
 )
 groq_api_key = groq_api_key.strip() if groq_api_key else ""
 ai_enabled = bool(groq_api_key)
+
+st.sidebar.markdown(
+    f"""
+    <div class="sidebar-workspace-card">
+        <div class="workspace-eyebrow">현재 워크스페이스</div>
+        <div class="workspace-name">{html.escape(dataset_name)}</div>
+        <div class="workspace-state"><span class="state-dot"></span>변수 {len(variables)}개 · {"BGe" if scoring_method.startswith("BGe") else "BDeu"}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 csv_bytes = uploaded_bytes if uploaded_bytes is not None else raw_df.to_csv(index=False).encode("utf-8")
 
@@ -2817,13 +3083,52 @@ run_key = "|".join(
 st.markdown(
     f"""
     <div class="hero-container">
-        <div class="hero-badge">Quantum Causal Discovery Lab</div>
+        <div class="hero-badge">Decision intelligence · Quantum R&amp;D</div>
         <div class="hero-title">
             Causal Discovery Workspace
         </div>
         <div class="hero-subtitle">
             관측 데이터에서 구조를 탐색하고, 개입 후보의 효과와 불확실성을 비교합니다.
             양자 탐색은 동일한 구조 탐색 문제를 다른 계산 모델로 검증하는 실험 트랙입니다.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+_workspace_dataset = html.escape(dataset_name)
+_workspace_mode = "양자 검증 준비" if is_quantum_compatible else "확장 탐색 모드"
+_workspace_scope = f"변수 {len(variables)}개 · 표본 {len(data):,}개"
+st.markdown(
+    f"""
+    <div class="workspace-bar">
+        <div class="workspace-identity">
+            <div class="workspace-label">현재 분석</div>
+            <div class="workspace-title">{_workspace_dataset}</div>
+        </div>
+        <div class="workspace-meta">
+            <span class="workspace-chip">{html.escape(_workspace_scope)}</span>
+            <span class="workspace-chip">{_scoring_label} 점수</span>
+            <span class="workspace-chip">계산 {scoring_elapsed:.2f}초</span>
+            <span class="workspace-chip ready"><span class="state-dot"></span>&nbsp;분석 준비 완료</span>
+        </div>
+    </div>
+    <div class="workflow-rail">
+        <div class="workflow-step complete">
+            <div class="workflow-index">01</div>
+            <div class="workflow-copy"><div class="workflow-title">데이터 프로필</div><div class="workflow-detail">{html.escape(_workspace_scope)}</div></div>
+        </div>
+        <div class="workflow-step complete">
+            <div class="workflow-index">02</div>
+            <div class="workflow-copy"><div class="workflow-title">구조 발견</div><div class="workflow-detail">최적 DAG 점수 계산 완료</div></div>
+        </div>
+        <div class="workflow-step complete">
+            <div class="workflow-index">03</div>
+            <div class="workflow-copy"><div class="workflow-title">개입 타겟</div><div class="workflow-detail">효과 우선순위 산출</div></div>
+        </div>
+        <div class="workflow-step pending">
+            <div class="workflow-index">04</div>
+            <div class="workflow-copy"><div class="workflow-title">검증 트랙</div><div class="workflow-detail">{html.escape(_workspace_mode)}</div></div>
         </div>
     </div>
     """,
@@ -2864,6 +3169,15 @@ else:
     _top_target = "-"
     _top_action = "추천 가능한 개입 없음"
 
+st.markdown(
+    """
+    <div class="analysis-snapshot">
+        <div><div class="section-kicker">Decision brief</div><h2>현재 분석 요약</h2></div>
+        <div class="analysis-snapshot-note">데이터 점수와 개입 추정치를 한 화면에서 확인합니다.</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 metric_cols = st.columns(5)
 metric_cols[0].metric("분석 변수", f"{len(variables)}개", ", ".join(variables))
 metric_cols[1].metric("유효 DAG", f"{len(valid_dags):,}개", f"전체 {n_total:,}개 중")
