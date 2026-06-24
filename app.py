@@ -2826,12 +2826,19 @@ st.sidebar.divider()
 _scoring_options = ["BDeu (이산)"]
 if score_all_dags_bge is not None:
     _scoring_options.append("BGe (연속)")
+# 선택된 변수가 모두 고카디널리티 연속형이면 BGe 추천 안내
+_continuous_cols = [c for c in variables if c in raw_df.columns and raw_df[c].nunique(dropna=True) > 8]
+_is_all_continuous = len(_continuous_cols) == len(variables) and len(variables) > 0
+_scoring_default = 1 if (_is_all_continuous and len(_scoring_options) > 1) else 0
 scoring_method = st.sidebar.radio(
     "점수 함수",
     _scoring_options,
+    index=_scoring_default,
     horizontal=True,
     help="BDeu: 이산 데이터에 최적. BGe: 연속 데이터를 이산화 없이 직접 평가 (정보 손실 없음).",
 )
+if _is_all_continuous and not scoring_method.startswith("BGe") and len(_scoring_options) > 1:
+    st.sidebar.info("선택한 변수가 모두 연속형입니다. **BGe**를 사용하면 이산화 없이 정보 손실 없는 분석이 가능합니다.")
 use_bge = scoring_method.startswith("BGe")
 ess = int(st.sidebar.slider("BDeu ESS", min_value=1, max_value=50, value=10, disabled=use_bge))
 top_k = int(st.sidebar.slider("Grover Oracle top-k", min_value=1, max_value=20, value=6))
@@ -4585,7 +4592,83 @@ with tabs[5]:
         if _cached_syn:
             render_ai_box(_cached_syn)
     else:
-        st.markdown("#### Key Findings (Local)")
+        st.markdown("#### 종합 분석 보고서")
+        _local_intv_preview = intervention_table(data, best_graph, variables, outcome, outcome_higher_is_better)
+        _local_has_intv = has_actionable_intervention(_local_intv_preview)
+        _local_top = _local_intv_preview.iloc[0] if _local_has_intv else None
+
+        # 구조 발견 요약
+        st.markdown(
+            f"""
+            <div class="finding-card">
+                <div class="finding-label">인과 구조 발견</div>
+                <div class="finding-body">
+                {len(valid_dags):,}개 유효 DAG 후보를 {_scoring_label} 점수로 평가한 결과,
+                <b>{format_edges(best_graph.edges())}</b>가 데이터에 가장 부합하는 구조로 선별되었습니다
+                {f'(정답 대비 F1={best_metrics["f1"]:.2f}, SHD={best_metrics["shd"]})' if best_metrics else ''}.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        # 개입 전략 요약
+        if _local_has_intv:
+            st.markdown(
+                f"""
+                <div class="finding-card">
+                    <div class="finding-label">개입 전략 추천</div>
+                    <div class="finding-body">
+                    <b>{outcome}</b>을 {'높이' if outcome_higher_is_better else '줄이'}려면
+                    <b>{_local_top['target']}</b>에 대한 <b>{_local_top['recommended_action']}</b> 조치가
+                    가장 효과적입니다 (효과 크기: {_local_top['effect_high_minus_low']:.4f},
+                    신뢰도: {_local_top.get('reliability', 'N/A')}).
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """
+                <div class="nextstep-card">
+                    <div class="nextstep-label">개입 전략</div>
+                    <div class="nextstep-body">
+                    현재 구조 기준으로 명확한 개입 타겟이 도출되지 않았습니다. 결과 변수를 바꾸거나 정답 DAG를 지정해 재분석을 시도해보세요.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        # 양자 탐색 요약
+        if grover_active:
+            _uniform_p = top_k_effective / (2 ** n_edges)
+            _amp_ratio = active_grover_r['good_probability'] / _uniform_p if _uniform_p > 0 else 0
+            st.markdown(
+                f"""
+                <div class="finding-card">
+                    <div class="finding-label">양자 탐색 결과</div>
+                    <div class="finding-body">
+                    {n_edges}큐비트 Grover 회로로 상위 {top_k_effective}개 DAG의 측정 확률을
+                    균등 분포 대비 <b>{_amp_ratio:.1f}배</b> 증폭했습니다 (적중률 {active_grover_r['good_probability']*100:.1f}%).
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """
+                <div class="nextstep-card">
+                    <div class="nextstep-label">양자 탐색</div>
+                    <div class="nextstep-body">
+                    아직 Grover 회로를 실행하지 않았습니다. [양자적 접근] 탭에서 실행하면 여기에 결과가 반영됩니다.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        # 기존 Local insights도 유지
         insights = generate_interpretation(
             has_gt=has_ground_truth,
             best_metrics=best_metrics,
@@ -4597,16 +4680,29 @@ with tabs[5]:
             variables=variables,
             dataset_name=dataset_name,
         )
-        for color, title, body in insights:
-            st.markdown(
-                f"""
-                <div style="border-left: 4px solid {color}; background: {color}08; padding: 0.9rem 1.2rem; border-radius: 0 10px 10px 0; margin-bottom: 0.7rem;">
-                    <div style="font-weight: 700; color: {color}; font-size: 0.95rem;">{title}</div>
-                    <div style="color: #334155; font-size: 0.88rem;">{body}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+        if insights:
+            st.markdown("#### 세부 분석 포인트")
+            for color, title, body in insights:
+                st.markdown(
+                    f"""
+                    <div style="border-left: 4px solid {color}; background: {color}08; padding: 0.9rem 1.2rem; border-radius: 0 10px 10px 0; margin-bottom: 0.7rem;">
+                        <div style="font-weight: 700; color: {color}; font-size: 0.95rem;">{title}</div>
+                        <div style="color: #334155; font-size: 0.88rem;">{body}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown(
+            """
+            <div class="guide-banner" style="margin-top:1rem;">
+            <h4>AI 종합 보고서를 원하시나요?</h4>
+            <p>사이드바에 Groq API 키를 입력하면 위 분석 결과를 LLaMA 3.3 70B가 전문 보고서로 변환해줍니다.
+            API 키 없이도 위의 모든 분석과 결론은 정상 작동합니다.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     st.divider()
     st.markdown("#### 재현 가능한 분석 보고서")
