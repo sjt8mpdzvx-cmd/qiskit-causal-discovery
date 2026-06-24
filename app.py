@@ -217,6 +217,36 @@ DATASETS: dict[str, DatasetSpec] = {
         story="학습 시간·생활 습관·결석과 성적의 관계를 탐색하는 교육용 예제입니다. 알려진 정답 DAG가 없으므로 구조와 개입 결과는 가설 생성용으로만 해석합니다.",
         outcome_higher_is_better=True,
     ),
+    "Manufacturing Process (제조 공정) 🔬": DatasetSpec(
+        file="manufacturing_process.csv",
+        description="합성 연속형 제조 공정 데이터. 온도·촉매 농도가 압력·점도·수율에 미치는 인과 경로를 BGe로 분석합니다.",
+        default_vars=("Temperature", "CatalystConc", "Pressure", "Yield"),
+        ground_truth=(
+            ("Temperature", "Pressure"),
+            ("Temperature", "Viscosity"),
+            ("Pressure", "Yield"),
+            ("CatalystConc", "Yield"),
+            ("Viscosity", "Yield"),
+        ),
+        outcome_hint="Yield",
+        story="제조사가 배치 수율을 극대화하려 할 때, 온도를 올려야 하는지 촉매 농도를 높여야 하는지 — 인과 구조를 통해 가장 효과적인 공정 개입 지점을 찾는 문제입니다.",
+        outcome_higher_is_better=True,
+    ),
+    "Economic Indicators (경제 지표) 📈": DatasetSpec(
+        file="economic_indicators.csv",
+        description="합성 연속형 거시경제 데이터. 금리가 투자·주택 가격·GDP·고용률에 미치는 인과 경로를 BGe로 분석합니다.",
+        default_vars=("InterestRate", "Investment", "GDP", "Employment"),
+        ground_truth=(
+            ("InterestRate", "Investment"),
+            ("InterestRate", "HousingPrice"),
+            ("Investment", "GDP"),
+            ("HousingPrice", "GDP"),
+            ("GDP", "Employment"),
+        ),
+        outcome_hint="Employment",
+        story="중앙은행이 고용률을 높이려 할 때, 금리 인하가 투자·주택 경로 중 어디를 통해 GDP와 고용에 영향을 미치는지 인과 분석으로 정책 효과를 판단하는 문제입니다.",
+        outcome_higher_is_better=True,
+    ),
 }
 
 
@@ -225,6 +255,9 @@ OUTCOME_DIRECTION_DEFAULTS: dict[str, bool] = {
     "MPG": True,
     "StudyTime": True,
     "FinalGrade": True,
+    "Yield": True,
+    "GDP": True,
+    "Employment": True,
     # Higher is usually worse in the built-in stories
     "Erk": False,
     "Akt": False,
@@ -242,6 +275,7 @@ OUTCOME_DIRECTION_DEFAULTS: dict[str, bool] = {
     "Displacement": False,
     "Horsepower": False,
     "Weight": False,
+    "InterestRate": False,
 }
 
 
